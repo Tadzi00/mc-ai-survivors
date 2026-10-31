@@ -83,6 +83,9 @@ export function buildObservation(o: ObservationInput): string {
   lines.push(`Surroundings: ${surroundings(bot)}.`);
   lines.push(`Goal: ${memory.data.goal ?? '(none)'}`);
   lines.push(`Inventory: ${inventorySummary(bot)}. Holding: ${bot.heldItem?.name ?? 'nothing'}.`);
+  // Armor (slots 5-8) and offhand (45) are not part of inventory.items().
+  const worn = [5, 6, 7, 8, 45].map((i) => bot.inventory.slots[i]?.name).filter((n): n is string => !!n);
+  lines.push(`Wearing: ${worn.length ? worn.join(', ') : 'no armor'}.`);
   lines.push(progressFor(o));
 
   const notable: string[] = [];
