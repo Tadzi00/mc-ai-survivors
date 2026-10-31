@@ -123,6 +123,7 @@ export function nearestStandable(bot: Bot, p: Vec3, radius = 3): Vec3 | undefine
 export async function gotoNear(ctx: SkillContext, x: number, y: number, z: number, range = 1, timeoutMs = 60_000): Promise<void> {
   throwIfAborted(ctx.signal);
   const { bot } = ctx;
+  await transitHomeDoor(ctx, { x, y, z });
   if (range <= 1) {
     const target = v3(Math.floor(x), Math.floor(y), Math.floor(z));
     if (bot.blockAt(target) && !isStandable(bot, target)) {
@@ -146,6 +147,7 @@ export async function gotoNear(ctx: SkillContext, x: number, y: number, z: numbe
 
 export async function gotoXZ(ctx: SkillContext, x: number, z: number, timeoutMs = 60_000): Promise<void> {
   const { bot } = ctx;
+  await transitHomeDoor(ctx, { x, y: bot.entity.position.y, z });
   const onAbort = (): void => bot.pathfinder.stop();
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   try {
@@ -247,4 +249,57 @@ export function isTreeLog(bot: Bot, b: Block): boolean {
     }
   }
   return false;
+}
+
+/** True if `p` is inside the box around a home/village spot (shelter footprint ± margin). */
+export function inHomeBox(ctx: SkillContext, p: { x: number; y: number; z: number }, margin = 3): boolean {
+  for (const key of ['home', 'village']) {
+    const h = ctx.memory.place(key);
+    if (h && Math.abs(p.x - h.x) <= margin && Math.abs(p.z - h.z) <= margin && p.y >= h.y - 1 && p.y <= h.y + 3) return true;
+  }
+  return false;
+}
+
+/** Blocks that belong to a home or protected area: never mine them. */
+export function isHomeBlock(ctx: SkillContext, p: { x: number; y: number; z: number }): boolean {
+  return inHomeBox(ctx, p, 5) || !!ctx.protectedAreas?.contains(p);
+}
+
+/**
+ * Leaving or entering the house through its door, scripted: the pathfinder's own door handling is
+ * unreliable and it used to dig through the floor/walls instead. Does nothing unless exactly one of
+ * (bot, target) is inside the home box and a door is found near home.
+ */
+export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y: number; z: number }): Promise<void> {
+  const { bot } = ctx;
+  const home = ctx.memory.place('home');
+  if (!home) return;
+  const me = bot.entity.position;
+  const meIn = inHomeBox(ctx, me, 2);
+  const targetIn = inHomeBox(ctx, target, 2);
+  if (meIn === targetIn) return;
+  const doors = findBlocks(bot, Object.keys(bot.registry.blocksByName).filter((n) => n.endsWith('_door') && !n.includes('trap')), 7, 4)
+    .filter((b) => Math.abs(b.position.x - home.x) <= 4 && Math.abs(b.position.z - home.z) <= 4)
+    .map((b) => (bot.blockAt(b.position.offset(0, -1, 0))?.name.endsWith('_door') ? bot.blockAt(b.position.offset(0, -1, 0))! : b));
+  const door = doors[0];
+  if (!door) return;
+  const d = door.position;
+  // Outward direction: from home towards the door, along the dominant axis.
+  const dx = d.x - home.x, dz = d.z - home.z;
+  const out = Math.abs(dx) >= Math.abs(dz) ? v3(Math.sign(dx) || 1, 0, 0) : v3(0, 0, Math.sign(dz) || 1);
+  const inside = d.minus(out);
+  const outside = d.plus(out);
+  const [from, to] = meIn ? [inside, outside.plus(out)] : [outside, inside];
+  try {
+    await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(from.x, from.y, from.z)), 15_000, 'door');
+    const now = bot.blockAt(d);
+    if (now && (now as unknown as { getProperties(): { open?: boolean } }).getProperties().open !== true) await bot.activateBlock(now);
+    await sleep(250);
+    await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(to.x, to.y, to.z)), 8_000, 'door');
+    const after = bot.blockAt(d);
+    if (after && (after as unknown as { getProperties(): { open?: boolean } }).getProperties().open === true) await bot.activateBlock(after);
+  } catch {
+    if (ctx.signal.aborted) throw new AbortError();
+    // fall back to normal pathfinding
+  }
 }

@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, freeSpotNearBot, gotoNear, isTreeLog, nearManMade, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, freeSpotNearBot, gotoNear, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -57,10 +57,12 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
       const targets = findBlocks(bot, names, 64, 32)
         .filter((b) => b.position.y > -60 && !skip.has(posKey(b)))
         // never take blocks from buildings: logs must be trees; nothing inside protected areas
-        .filter((b) => !ctx.protectedAreas?.contains(b.position) && (isLog ? isTreeLog(bot, b) : !nearManMade(bot, b.position, 1)))
+        // ...and never from a home (its own floor/walls are plain dirt/cobblestone and were being mined)
+        .filter((b) => !isHomeBlock(ctx, b.position) && (isLog ? isTreeLog(bot, b) : !nearManMade(bot, b.position, 1)))
         .sort((p, q) => targetCost(bot, p, feetY) - targetCost(bot, q, feetY));
       if (targets.length === 0) break;
       const target = targets[0]!;
+      await transitHomeDoor(ctx, target.position); // leave the house through the door, not the floor
       // Blocks with harvestTools (stone, ores) drop nothing without a suitable tool.
       if (target.harvestTools && !Object.keys(target.harvestTools).some((id) => bot.inventory.items().some((i) => String(i.type) === id))) {
         return `need a better tool to harvest ${target.name} (craft a pickaxe)`;

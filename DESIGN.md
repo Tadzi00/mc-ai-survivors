@@ -423,6 +423,11 @@ are not logged (size); the hash lets you spot repeated identical situations.
   note "contains ..." shown in the observation; `chest_take {items:["list"]}` just looks inside.
   `scripts/chest-test.mjs` is a live smoke test.
 - `sleep` walks to a standable spot next to the bed (either half) instead of at the bed block itself.
+- Houses: `gather` never mines blocks within 5 blocks of the bot's home/village or in protected areas (its
+  floor and walls are plain dirt/cobblestone and were being mined). When the bot is inside its home box and
+  the target is outside (or the reverse), `transitHomeDoor` walks to the door, opens it, steps through and
+  closes it, before normal pathfinding (`gotoNear`, `gotoXZ`, each gather target). No door found → normal
+  pathfinding, which still can't dig within 4 blocks of home.
 - `follow` refuses other bots ("split the work instead"); only humans can be followed. A bot used to spend
   most of its time walking behind its teammate.
 - Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge
