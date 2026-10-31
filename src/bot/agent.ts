@@ -181,6 +181,11 @@ export class BotAgent {
       if (this.deps.rcon && this.deps.config.bot.serverCrafting) enableServerCrafting(bot, this.name, this.deps.rcon);
       // Use doors instead of digging through walls (Paper handles door opening fine).
       moves.canOpenDoors = true;
+      // Built blocks (glass, panes, planks, doors, beds, ...) are never broken while pathfinding, so a closed
+      // house can only be entered through its door. (The exclusion cost below covers blocks NEXT to them.)
+      for (const b of Object.values(bot.registry.blocksByName)) {
+        if (MAN_MADE_RE.test(b.name)) moves.blocksCantBreak.add(b.id);
+      }
       // Never dig through our own (or a known) shelter: breaking blocks near home costs a fortune.
       moves.exclusionAreasBreak.push((block: { name: string; position: Vec3 }) => {
         const p = block.position;

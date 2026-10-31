@@ -246,8 +246,9 @@ Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merg
   `/survivors unprotect`). Bots = names matching `protection.bot-name-pattern`.
 - Bot side (so they don't waste time): `gather log` only takes logs that look like trees (leaves within a
   few blocks, nothing man-made within 2); other gathers skip blocks touching man-made blocks; nothing inside
-  protected areas (refreshed from `SB|v1|areas` every 60 s). The pathfinder gives digging man-made blocks,
-  blocks touching them, or blocks in protected areas a huge cost; the unstuck routine never digs them.
+  protected areas (refreshed from `SB|v1|areas` every 60 s). Man-made block types are in the pathfinder's `blocksCantBreak` (a closed house is
+  entered through its door; `canOpenDoors` is on), blocks touching them or inside protected areas get a huge
+  dig cost, and the unstuck routine never digs them. An open window hole is still a valid path.
 - `/msg <bot> !home` sets the bot's home to the player's position (so a house you built becomes its home);
   a bot without a bed is pointed at the nearest bed it sees ("claim it" via `sleep`).
 
