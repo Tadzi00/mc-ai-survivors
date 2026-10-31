@@ -3,7 +3,7 @@ import type { SkillArgsOf, SkillName } from './schemas.js';
 import { addDoorSkill, buildShelterSkill, placeBedSkill, placeBlockSkill, placeTorchSkill } from './impl/building.js';
 import { farmSkill } from './impl/farm.js';
 import {
-  checkTemperatureSkill, markPlaceSkill, readBookSkill, readSignsSkill, rememberSkill, saySkill, shoutSkill, setGoalSkill, waitSkill, writeBookSkill, writeSignSkill,
+  checkTemperatureSkill, markPlaceSkill, setHomeSkill, readBookSkill, readSignsSkill, rememberSkill, saySkill, shoutSkill, setGoalSkill, waitSkill, writeBookSkill, writeSignSkill,
 } from './impl/knowledge.js';
 import { exploreSkill, followSkill, gotoSkill } from './impl/movement.js';
 import { craftSkill, gatherSkill, smeltSkill } from './impl/resources.js';
@@ -35,6 +35,7 @@ export const SKILLS: Registry = {
   say: saySkill,
   shout: shoutSkill,
   mark_place: markPlaceSkill,
+  set_home: setHomeSkill,
   write_sign: writeSignSkill,
   read_signs: readSignsSkill,
   write_book: writeBookSkill,

@@ -268,6 +268,8 @@ Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merg
   protected areas (refreshed from `SB|v1|areas` every 60 s). Man-made block types are in the pathfinder's `blocksCantBreak` (a closed house is
   entered through its door; `canOpenDoors` is on), blocks touching them or inside protected areas get a huge
   dig cost, and the unstuck routine never digs them. An open window hole is still a valid path.
+- A bot sets its own home with `set_home {}` (where it stands; reports sealed/leaky/warm via `room raw`), and
+  automatically when it claims, places or sleeps in a bed while it has no home yet (the bed spot).
 - `/msg <bot> !home` sets the bot's home to the player's position (so a house you built becomes its home);
   a bot without a bed is pointed at the nearest bed it sees ("claim it" via `sleep`).
 

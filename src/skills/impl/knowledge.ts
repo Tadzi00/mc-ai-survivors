@@ -61,6 +61,23 @@ export async function shoutSkill(ctx: SkillContext, a: SkillArgsOf<'shout'>): Pr
 
 const PROTECTED_PLACES = new Set(['bed', 'spare_bed']);
 
+/** set_home: where the bot stands becomes its home (door transit, no-dig zone, warm_home reflex use it). */
+export async function setHomeSkill(ctx: SkillContext): Promise<string> {
+  const p = ctx.bot.entity.position.floored();
+  let room = '';
+  if (ctx.seasons.enabled) {
+    const r = await ctx.seasons.room(p.x, p.y, p.z).catch(() => undefined);
+    if (r) {
+      room = r.inside
+        ? ` (${r.sealed ? 'sealed room' : 'LEAKY room - fix holes'}, ${r.tempC.toFixed(1)}C${r.comfortable ? '' : ', not warm yet - add a torch'})`
+        : ' (WARNING: this spot is outdoors, not inside a room)';
+    }
+  }
+  ctx.memory.setPlace('home', { ...p, note: 'set by me' });
+  delete ctx.memory.data.places.doorway;
+  return `home set to ${fmtPos(p)}${room}`;
+}
+
 export async function markPlaceSkill(ctx: SkillContext, a: SkillArgsOf<'mark_place'>): Promise<string> {
   const key = a.name.trim().toLowerCase().replace(/\s+/g, '_');
   if (PROTECTED_PLACES.has(key)) return `"${key}" is set automatically when you place/claim a bed; pick another name`;

@@ -275,6 +275,7 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
         // First bed: claim it (bridge auto-assigns on bed use); later beds stay free for newborns.
         await bot.activateBlock(placed).catch(() => undefined);
         ctx.memory.setPlace('bed', foot);
+        if (!ctx.memory.place('home')) ctx.memory.setPlace('home', { ...foot, note: 'where my bed is' }); // a bed makes a home
         return `placed and claimed my bed at ${fmtPos(foot)}`;
       }
       ctx.memory.addNote(`Spare bed for a newborn at ${fmtPos(foot)}.`);

@@ -115,11 +115,13 @@ export async function sleepSkill(ctx: SkillContext): Promise<string> {
       // Daytime: right-clicking still sets spawn → bridge plugin auto-assigns this bed to us.
       await bot.activateBlock(bed).catch(() => undefined);
       ctx.memory.setPlace('bed', bed.position);
+      if (!ctx.memory.place('home')) ctx.memory.setPlace('home', { ...bed.position, note: 'where my bed is' }); // a bed makes a home
       return `it is day; claimed bed at ${fmtPos(bed.position)} (spawn set)`;
     }
     return `could not sleep: ${msg}`;
   }
   ctx.memory.setPlace('bed', bed.position);
+  if (!ctx.memory.place('home')) ctx.memory.setPlace('home', { ...bed.position, note: 'where my bed is' }); // a bed makes a home
   const deadline = Date.now() + 60_000;
   while (bot.isSleeping && Date.now() < deadline) await sleep(1000, ctx.signal);
   return 'slept';
