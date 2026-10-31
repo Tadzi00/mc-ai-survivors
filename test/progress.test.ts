@@ -15,10 +15,13 @@ describe('progress ladder', () => {
     expect(next({ ...empty, items: { spruce_log: 8 } })).toBe('table');
     expect(next({ ...empty, items: { spruce_log: 6, crafting_table: 1 } })).toBe('wooden_pickaxe');
     expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, spruce_planks: 4 } })).toBe('sword');
-    expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1 } })).toBe('stone_pickaxe');
+    // shelter comes before better tools
+    expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1 } })).toBe('food');
+    expect(next({ ...empty, tableNearby: true, foodCount: 5, items: { wooden_pickaxe: 1, wooden_sword: 1, dirt: 70 } })).toBe('shelter');
+    expect(next({ ...empty, tableNearby: true, foodCount: 5, homeKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, torch: 2 } })).toBe('stone_pickaxe');
   });
   it('asks for missing cobblestone before a stone pickaxe', () => {
-    const f = { ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1, cobblestone: 1 } };
+    const f = { ...empty, tableNearby: true, foodCount: 5, homeKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, cobblestone: 1, torch: 2 } };
     expect(progressText(f)).toContain('need 2 more cobblestone');
     expect(progressText({ ...f, items: { ...f.items, cobblestone: 3 } })).toContain('"item":"stone_pickaxe"');
   });

@@ -44,13 +44,25 @@ and keeps LLM traffic low (one call per finished skill, not per tick).
 ### 2.2 Progress ladder (`src/bot/progress.ts`)
 
 Every observation contains a deterministic checklist and ONE "NEXT STEP" with a ready skill call:
-wood → crafting table → pickaxe → sword → stone pickaxe → food (5) → 70 building blocks → shelter →
-heat (2 torches or a warm sealed room) → own bed → spare bed. Facts come from inventory, nearby crafting
+wood → crafting table → pickaxe → sword → food (5) → 70 building blocks → shelter →
+heat (2 torches or a warm sealed room) → stone pickaxe → own bed → spare bed. Shelter and heat come
+**before** better tools on purpose (a night outside kills; a stone pickaxe can wait). Facts come from inventory, nearby crafting
 table, remembered places (`home`, `bed`, `spare_bed`) and the RealisticSeasons reading. Prompts tell
 both tiers to follow it unless in danger or it just failed. **Why:** small local models (3-7B) loop on
 "gather wood" without a concrete next step; computing the tech tree in code is cheap and reliable.
 
-### 2.3 Idle watchdog
+### 2.3 Multi-step plans (smart bots)
+
+Smart bots answer `{"thought","plan":[{skill,args}, ...]}` with 1-5 steps (`parsePlan` in
+`src/bot/action.ts`); basic bots still answer one action (a plan from them is cut to its first step).
+Steps run one after another **without** another model call. The rest of the plan is dropped (and the
+reason shown next turn as "plan stopped/paused ...") when a step fails (`looksFailed` result heuristic),
+a reflex interrupts or a skill times out, the bot hears chat, or it gets hurt. One invalid step rejects
+the whole plan so the model fixes it. **Why:** fewer model calls, and the bot can sequence things like
+gather → build_shelter → place_torch instead of re-deciding after every step. The progress ladder stays
+a suggestion; smart bots may put shelter before tools.
+
+### 2.4 Idle watchdog
 
 Every 10 s a bot checks whether it moved >= 1 block in the last 30 s (ignored while sleeping). If not,
 it logs `IDLE: ... waiting for the model / skill X not moving / doing nothing` (and a jsonl `idle`
@@ -127,10 +139,27 @@ real world data. The orchestrator never counts beds itself.
 
 ### 6.1 Proximity chat (intentional)
 
-Minecraft chat is global, but a bot only **hears** a message if the speaker's entity position is known
-and within `chatRange` (default 32) blocks (`src/bot/chat.ts`). Unknown position (out of render
-distance) = not heard. Humans still see all chat in their client; the limit models bots' perception.
-**Why:** it makes physical proximity matter and forces durable channels for long-range knowledge.
+Minecraft chat is global, but bots only **hear** part of it (`src/bot/chat.ts`):
+
+- **say** (`say` skill, plain chat): heard within `chatRange` (default **15**) blocks, and only when the
+  speaker's position is known (visible entity or another bot of this orchestrator). Otherwise not heard.
+- **shout** (`shout` skill, chat line prefixed `[SHOUT] `): heard within `shout.range` (default **1000**)
+  blocks, max `shout.maxWords` (15) words, one shout per `shout.cooldownSeconds` (60) per bot; longer
+  shouts are refused, not truncated. Listeners see `<Name SHOUTS @x,y,z (230m NE)> text`.
+  A human shouting from beyond entity range (position unknown) is assumed to be in range.
+- Bot positions for far-away bots come from the in-process `Roster` (updated every second), since
+  entities beyond view distance are invisible to mineflayer.
+
+Humans still see all chat in their client; the limits model the bots' perception.
+**Why:** proximity matters, shouting is a scarce long-range channel (meet-ups, warnings), and durable
+knowledge still needs signs and books.
+
+### 6.1.1 Coordinates and the village
+
+Bots see their own `Pos x,y,z`, `goto {x,y,z}` accepts exact coordinates, `mark_place {name}` saves the
+current position (`bed` and `spare_bed` are reserved), and shouts carry the shouter's coordinates. The
+smart prompt asks the tribe to pick ONE village spot, `mark_place "village"`, shout it, and build all
+shelters and beds there; basic bots are told to go to a shouted village.
 
 ### 6.2 Signs and books
 

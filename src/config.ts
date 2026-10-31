@@ -80,7 +80,14 @@ export const ConfigSchema = z
       })
       .default({}),
     /** Blocks; bots only "hear" chat from players within this distance. */
-    chatRange: z.number().min(1).default(32),
+    chatRange: z.number().min(1).default(15),
+    shout: z
+      .object({
+        range: z.number().min(1).default(1000),
+        maxWords: z.number().int().min(1).default(15),
+        cooldownSeconds: z.number().min(0).default(60),
+      })
+      .default({}),
     bot: z
       .object({
         plannerMinIntervalSeconds: z.number().min(0).default(6),

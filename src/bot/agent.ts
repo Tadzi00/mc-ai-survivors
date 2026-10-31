@@ -17,8 +17,9 @@ import { eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { placeTorchSkill } from '../skills/impl/building.js';
 import { JsonlLog, log, shortHash } from '../util/log.js';
 import { AbortError, sleep, TimeoutError } from '../util/time.js';
-import { fallbackAction, parseAction, type PlannedAction } from './action.js';
-import { ChatLog } from './chat.js';
+import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './action.js';
+import { shoutCooldownLeft } from '../skills/impl/knowledge.js';
+import { ChatLog, Roster } from './chat.js';
 import { Memory } from './memory.js';
 import { buildObservation } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
@@ -30,6 +31,8 @@ export interface AgentDeps {
   config: Config;
   llm: LLMRegistry;
   seasons: SeasonsApi;
+  /** Positions of all bots in this orchestrator (shout range for bots out of entity view). */
+  roster: Roster;
 }
 
 export interface AgentEvents {
@@ -66,6 +69,9 @@ export class BotAgent {
   private planningSince = 0;
   private posHistory: Array<{ t: number; x: number; y: number; z: number }> = [];
   private lastIdleWarn = 0;
+  /** Remaining steps of the current multi-step plan (smart bots). Cleared when something changes. */
+  private planQueue: PlannedAction[] = [];
+  private planNote: string | undefined;
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -140,8 +146,9 @@ export class BotAgent {
     });
 
     bot.on('chat', (username, message) => {
-      const speaker = bot.players[username]?.entity;
-      if (this.chat.offer(this.name, username, message, bot.entity?.position, speaker?.position, this.deps.config.chatRange)) {
+      const speakerPos = bot.players[username]?.entity?.position ?? this.deps.roster.get(username);
+      const ranges = { say: this.deps.config.chatRange, shout: this.deps.config.shout.range };
+      if (this.chat.offer(this.name, username, message, bot.entity?.position, speakerPos, ranges)) {
         this.jsonl.write('heard', { from: username, text: message });
         this.wakePlanner('chat');
       }
@@ -182,6 +189,7 @@ export class BotAgent {
   private async handleDeath(): Promise<void> {
     if (this.dead) return;
     this.dead = true;
+    this.deps.roster.remove(this.name);
     const bot = this.bot!;
     // Server death message usually arrives just before/after the death event.
     await sleep(500);
@@ -199,6 +207,11 @@ export class BotAgent {
   }
 
   private wakePlanner(reason: string): void {
+    // New information (chat, getting hurt): finish the current step, then re-plan with fresh state.
+    if (this.planQueue.length) {
+      this.planNote = `plan paused after: ${reason}; remaining steps were ${this.planQueue.map((p) => p.skill).join(', ')}`;
+      this.planQueue = [];
+    }
     // Only interrupt passive skills; real work continues.
     if (this.currentSkill === 'wait' || this.currentSkill === 'follow') {
       this.skillAbort?.abort();
@@ -236,7 +249,9 @@ export class BotAgent {
    */
   private async unstickTick(): Promise<void> {
     const bot = this.bot;
-    if (!this.running || !bot?.entity || this.unsticking) return;
+    if (!this.running || !bot?.entity) return;
+    this.deps.roster.update(this.name, bot.entity.position);
+    if (this.unsticking) return;
     if (!bot.pathfinder.isMoving() || bot.isSleeping) {
       this.moveTrack = [];
       this.stuckTries = 0;
@@ -497,24 +512,35 @@ export class BotAgent {
         await sleep(250);
         continue;
       }
-      this.lastPlanAt = Date.now();
       let action: PlannedAction;
-      try {
-        this.planningSince = Date.now();
-        action = await this.plan();
-      } catch (e) {
-        this.log('warn', `planner error: ${(e as Error).message}`);
-        this.jsonl.write('planner_error', { error: (e as Error).message });
-        action = fallbackAction(countItem(this.bot, /_log$/));
-        await sleep(5000);
+      if (this.planQueue.length) {
+        // Next step of the current plan: no model call needed.
+        action = this.planQueue.shift()!;
+      } else {
+        this.lastPlanAt = Date.now();
+        try {
+          this.planningSince = Date.now();
+          const steps = await this.plan();
+          action = steps[0]!;
+          this.planQueue = steps.slice(1);
+        } catch (e) {
+          this.log('warn', `planner error: ${(e as Error).message}`);
+          this.jsonl.write('planner_error', { error: (e as Error).message });
+          action = fallbackAction(countItem(this.bot, /_log$/));
+          await sleep(5000);
+        }
+        this.planningSince = 0;
       }
-      this.planningSince = 0;
       if (!this.running) break;
-      await this.execute(action);
+      const { result, interrupted } = await this.execute(action);
+      if (this.planQueue.length && (interrupted || looksFailed(result))) {
+        this.planNote = `plan stopped: step "${action.skill}" ${interrupted ? 'was interrupted' : 'failed'} (${result.slice(0, 120)}); dropped: ${this.planQueue.map((p) => p.skill).join(', ')}`;
+        this.planQueue = [];
+      }
     }
   }
 
-  private async plan(): Promise<PlannedAction> {
+  private async plan(): Promise<PlannedAction[]> {
     const bot = this.bot!;
     const { provider, tier } = this.deps.llm.forTier(this.tier);
     const obs = buildObservation({
@@ -528,15 +554,19 @@ export class BotAgent {
       heard: this.chat.recent(),
       recentResults: this.recentResults,
       interruptedBy: this.interruptedBy,
+      planNote: this.planNote,
+      shoutCooldown: shoutCooldownLeft(this.name, this.deps.config.shout.cooldownSeconds),
     });
     this.interruptedBy = undefined;
+    this.planNote = undefined;
     this.chat.takeUnread();
-    const system = systemPrompt(this.tier, this.name, this.deps.config.chatRange);
-    const messages: ChatMessage[] = [{ role: 'user', content: `${obs}\n\nChoose your next action.` }];
+    const system = systemPrompt(this.tier, this.name, this.deps.config.chatRange, this.deps.config.shout);
+    const ask = this.tier === 'smart' ? 'Make your plan (1-5 steps).' : 'Choose your next action.';
+    const messages: ChatMessage[] = [{ role: 'user', content: `${obs}\n\n${ask}` }];
     const started = Date.now();
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await provider.complete({ system, messages, maxTokens: tier.maxTokens, temperature: tier.temperature, model: tier.model });
-      const parsed = parseAction(res.text, this.tier);
+      const parsed = parsePlan(res.text, this.tier);
       this.jsonl.write('decision', {
         obsHash: shortHash(obs),
         attempt,
@@ -545,13 +575,16 @@ export class BotAgent {
         ok: parsed.ok,
         error: parsed.ok ? undefined : parsed.error,
       });
-      if (parsed.ok) return parsed.action;
+      if (parsed.ok) {
+        if (parsed.steps.length > 1) this.log('info', `plan: ${parsed.steps.map((p) => p.skill).join(' -> ')} — ${parsed.thought}`);
+        return parsed.steps;
+      }
       messages.push({ role: 'assistant', content: res.text.slice(0, 1000) }, { role: 'user', content: retryPrompt(parsed.error) });
     }
-    return fallbackAction(countItem(bot, /_log$/));
+    return [fallbackAction(countItem(bot, /_log$/))];
   }
 
-  private async execute(action: PlannedAction): Promise<void> {
+  private async execute(action: PlannedAction): Promise<{ result: string; interrupted: boolean }> {
     const ac = new AbortController();
     this.skillAbort = ac;
     this.currentSkill = action.skill;
@@ -593,5 +626,6 @@ export class BotAgent {
     while (this.recentResults.length > 6) this.recentResults.shift();
     this.log('info', `  => ${result}`);
     this.jsonl.write('skill', { skill: action.skill, args: action.args, thought: action.thought, result, ms: Date.now() - started });
+    return { result, interrupted: ac.signal.aborted };
   }
 }

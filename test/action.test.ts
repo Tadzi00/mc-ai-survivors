@@ -51,3 +51,48 @@ describe('parseAction', () => {
     expect(fallbackAction(20).skill).toBe('explore');
   });
 });
+
+import { looksFailed, parsePlan } from '../src/bot/action.js';
+
+describe('multi-step plans', () => {
+  it('parses a smart plan of up to 5 steps', () => {
+    const r = parsePlan(
+      JSON.stringify({
+        thought: 'shelter first',
+        plan: [
+          { skill: 'gather', args: { block: 'dirt', count: 40 } },
+          { skill: 'build_shelter', args: { size: 5 } },
+          { skill: 'place_torch', args: {} },
+        ],
+      }),
+      'smart',
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.steps.map((s) => s.skill)).toEqual(['gather', 'build_shelter', 'place_torch']);
+      expect(r.steps[0]!.thought).toBe('shelter first');
+    }
+  });
+  it('caps smart plans at 5 steps and basic plans at 1', () => {
+    const plan = Array.from({ length: 8 }, () => ({ skill: 'eat', args: {} }));
+    const smart = parsePlan(JSON.stringify({ plan }), 'smart');
+    const basic = parsePlan(JSON.stringify({ plan }), 'basic');
+    expect(smart.ok && smart.steps.length).toBe(5);
+    expect(basic.ok && basic.steps.length).toBe(1);
+  });
+  it('accepts a single action as a one-step plan', () => {
+    const r = parsePlan('{"thought":"x","skill":"eat","args":{}}', 'basic');
+    expect(r.ok && r.steps.length).toBe(1);
+  });
+  it('rejects a plan with an invalid step, naming the step', () => {
+    const r = parsePlan(JSON.stringify({ plan: [{ skill: 'eat' }, { skill: 'fly', args: {} }] }), 'smart');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('plan step 2');
+  });
+  it('detects failed results', () => {
+    expect(looksFailed('cannot craft stick: need 2 more planks')).toBe(true);
+    expect(looksFailed('timed out after 120s')).toBe(true);
+    expect(looksFailed('gathered 8 log (wanted 8)')).toBe(false);
+    expect(looksFailed('crafted 1 wooden_pickaxe (now have 1)')).toBe(false);
+  });
+});

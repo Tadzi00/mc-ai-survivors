@@ -71,7 +71,8 @@ describe('config', () => {
     const cfg = parseConfig(readFileSync('config.example.yaml', 'utf8'), {});
     expect(cfg.population.maxBots).toBe(8);
     expect(cfg.population.smartSlots).toBe(2);
-    expect(cfg.chatRange).toBe(32);
+    expect(cfg.chatRange).toBe(15);
+    expect(cfg.shout).toEqual({ range: 1000, maxWords: 15, cooldownSeconds: 60 });
     expect(cfg.tiers.smart.model).toBe('qwen2.5:7b');
   });
   it('rejects unknown tier provider', () => {

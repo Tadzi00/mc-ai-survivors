@@ -24,8 +24,13 @@ population:
   autoWhitelist: true     # "whitelist add <bot>" via RCON before each bot joins (offline mode safety)
   graceOnSeed: true       # no hostile mobs for one MC day when the first bots spawn (or re-seed after extinction)
 
-# Bots only hear chat from players within this many blocks (intentional, see DESIGN.md).
-chatRange: 32
+# "say": bots only hear chat from players within this many blocks (intentional, see DESIGN.md).
+chatRange: 15
+# "shout": heard up to `range` blocks, at most `maxWords` words, once per `cooldownSeconds` per bot.
+shout:
+  range: 1000
+  maxWords: 15
+  cooldownSeconds: 60
 
 bot:
   plannerMinIntervalSeconds: 6   # min time between LLM decisions per bot
@@ -72,7 +77,7 @@ tiers:
   smart:
     provider: local
     model: qwen2.5:7b
-    maxTokens: 300
+    maxTokens: 600   # room for a multi-step plan
     temperature: 0.4
   basic:
     provider: local

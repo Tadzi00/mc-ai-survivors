@@ -2,7 +2,7 @@ import type { Bot } from 'mineflayer';
 import type { SeasonsReading } from '../contracts.js';
 import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS } from '../skills/helpers.js';
-import type { HeardMessage } from './chat.js';
+import { formatHeard, type HeardMessage } from './chat.js';
 import type { Memory } from './memory.js';
 import { progressText } from './progress.js';
 
@@ -17,6 +17,10 @@ export interface ObservationInput {
   heard: readonly HeardMessage[];
   recentResults: readonly string[];
   interruptedBy?: string;
+  /** Why the previous multi-step plan ended early (smart bots). */
+  planNote?: string;
+  /** Seconds until this bot may shout again. */
+  shoutCooldown?: number;
 }
 
 const CATEGORIES: Array<[string, (n: string) => boolean]> = [
@@ -99,7 +103,7 @@ export function buildObservation(o: ObservationInput): string {
 
   if (o.heard.length) {
     lines.push('Heard recently:');
-    for (const h of o.heard.slice(-6)) lines.push(`  <${h.from}> ${h.text}`);
+    for (const h of o.heard.slice(-6)) lines.push(`  ${formatHeard(h, me)}`);
   }
   const places = Object.entries(memory.data.places).map(([k, p]) => `${k} ${fmtPos(p)}`);
   lines.push(`Known places: ${places.join('; ') || 'none'}.`);
@@ -112,6 +116,8 @@ export function buildObservation(o: ObservationInput): string {
     for (const r of o.recentResults.slice(-5)) lines.push(`  - ${r}`);
   }
   if (o.interruptedBy) lines.push(`(Your last action was interrupted by reflex: ${o.interruptedBy})`);
+  if (o.planNote) lines.push(`(${o.planNote})`);
+  if (o.shoutCooldown !== undefined) lines.push(`Shout: ${o.shoutCooldown > 0 ? `on cooldown ${o.shoutCooldown}s` : 'ready'}.`);
   return lines.join('\n');
 }
 

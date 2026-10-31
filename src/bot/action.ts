@@ -46,6 +46,44 @@ export function parseAction(text: string, tier: Tier): ParseResult {
   };
 }
 
+export const MAX_PLAN_STEPS = 5;
+
+export type PlanResult = { ok: true; thought: string; steps: PlannedAction[] } | { ok: false; error: string };
+
+/**
+ * Smart bots may answer with a short plan: {"thought","plan":[{"skill","args"},...]} (max 5 steps).
+ * A single {"thought","skill","args"} is accepted as a one-step plan (and is the only form for basic bots:
+ * a basic bot's plan is cut to its first step). Every step is validated; one bad step rejects the plan so
+ * the model can fix it.
+ */
+export function parsePlan(text: string, tier: Tier): PlanResult {
+  const obj = extractJsonObject(text);
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, error: 'no JSON object found' };
+  const o = obj as Record<string, unknown>;
+  const rawSteps = Array.isArray(o.plan) ? o.plan : Array.isArray(o.steps) ? o.steps : undefined;
+  if (!rawSteps) {
+    const single = parseAction(text, tier);
+    return single.ok ? { ok: true, thought: single.action.thought, steps: [single.action] } : single;
+  }
+  if (rawSteps.length === 0) return { ok: false, error: 'plan is empty' };
+  const thought = typeof o.thought === 'string' ? o.thought.slice(0, 300) : '';
+  const limit = tier === 'smart' ? MAX_PLAN_STEPS : 1;
+  const steps: PlannedAction[] = [];
+  for (const [i, step] of rawSteps.slice(0, limit).entries()) {
+    const r = parseAction(JSON.stringify(step), tier);
+    if (!r.ok) return { ok: false, error: `plan step ${i + 1}: ${r.error}` };
+    steps.push({ ...r.action, thought: r.action.thought || thought });
+  }
+  return { ok: true, thought, steps };
+}
+
+/** Heuristic: did a skill result string report failure? Used to abandon the rest of a plan. */
+export function looksFailed(result: string): boolean {
+  return /^(failed|cannot|could not|couldn't|no |not enough|need |unknown|timed out|interrupted|found no|too |you already|shout on cooldown|target .* inside)/i.test(
+    result.trim(),
+  );
+}
+
 /** Deterministic fallback when the model fails twice: get wood if poor, otherwise explore. */
 export function fallbackAction(logCount: number): PlannedAction {
   if (logCount < 8) return { thought: '(fallback) gather wood', skill: 'gather', args: { block: 'log', count: 4 } };

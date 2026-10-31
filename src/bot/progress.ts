@@ -1,6 +1,6 @@
 /**
  * Deterministic survival progress ladder (pure, unit-tested). Each planner turn the agent shows the bot
- * which milestones are done and the single NEXT step with a ready-to-use skill call, so small models
+ * which milestones are done and the single NEXT step (order: basics, shelter and heat BEFORE better tools) with a ready-to-use skill call, so small models
  * don't have to plan the tech tree themselves. See DESIGN.md "Progress ladder".
  */
 export interface ProgressFacts {
@@ -76,15 +76,6 @@ export function milestones(f: ProgressFacts): Milestone[] {
       hint: `{"skill":"craft","args":{"item":"${cobble >= 2 ? 'stone' : 'wooden'}_sword","count":1}}`,
     },
     {
-      id: 'stone_pickaxe',
-      label: 'stone pickaxe',
-      done: stonePickaxe,
-      hint:
-        cobble >= 3
-          ? `{"skill":"craft","args":{"item":"stone_pickaxe","count":1}}`
-          : `need ${3 - cobble} more cobblestone: {"skill":"gather","args":{"block":"stone","count":${3 - cobble + 8}}}`,
-    },
-    {
       id: 'food',
       label: 'food (5)',
       done: f.foodCount >= 5,
@@ -110,6 +101,15 @@ export function milestones(f: ProgressFacts): Milestone[] {
         coal > 0
           ? `{"skill":"craft","args":{"item":"torch","count":4}}`
           : `need coal for torches: {"skill":"gather","args":{"block":"coal_ore","count":3}} (needs a pickaxe)`,
+    },
+    {
+      id: 'stone_pickaxe',
+      label: 'stone pickaxe',
+      done: stonePickaxe,
+      hint:
+        cobble >= 3
+          ? `{"skill":"craft","args":{"item":"stone_pickaxe","count":1}}`
+          : `need ${3 - cobble} more cobblestone: {"skill":"gather","args":{"block":"stone","count":${3 - cobble + 8}}}`,
     },
     {
       id: 'own_bed',

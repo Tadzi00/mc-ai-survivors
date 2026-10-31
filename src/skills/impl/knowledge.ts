@@ -5,6 +5,7 @@ import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import { findBlocks, findItem, fmtPos, freeSpotNearBot, gotoNear, nearestBlock, placeItemAt } from '../helpers.js';
 import { craftSkill } from './resources.js';
+import { SHOUT_PREFIX, wordCount } from '../../bot/chat.js';
 
 /** signBook exists at runtime in mineflayer 4.x but is missing from its typings. */
 interface BookBot {
@@ -24,6 +25,38 @@ export async function checkTemperatureSkill(ctx: SkillContext): Promise<string> 
 export async function saySkill(ctx: SkillContext, a: SkillArgsOf<'say'>): Promise<string> {
   ctx.bot.chat(a.text.replace(/^\//, '').slice(0, 240));
   return 'said it (only players within chat range hear)';
+}
+
+/** Per-bot time of the last shout (cooldown is per bot name, survives skill calls). */
+const lastShout = new Map<string, number>();
+
+/** Seconds until `name` may shout again (0 = ready). */
+export function shoutCooldownLeft(name: string, cooldownSeconds: number, now = Date.now()): number {
+  const last = lastShout.get(name);
+  if (last === undefined) return 0;
+  return Math.max(0, Math.ceil(cooldownSeconds - (now - last) / 1000));
+}
+
+export async function shoutSkill(ctx: SkillContext, a: SkillArgsOf<'shout'>): Promise<string> {
+  const { maxWords, cooldownSeconds } = ctx.config.shout;
+  const text = a.text.replace(/^\//, '').replace(/\s+/g, ' ').trim();
+  const words = wordCount(text);
+  if (words > maxWords) return `too long: ${words} words, a shout may have at most ${maxWords}. Shorten it.`;
+  const wait = shoutCooldownLeft(ctx.name, cooldownSeconds);
+  if (wait > 0) return `shout on cooldown, ${wait}s left (use say for nearby players)`;
+  lastShout.set(ctx.name, Date.now());
+  ctx.bot.chat(`${SHOUT_PREFIX}${text}`.slice(0, 250));
+  return `shouted (heard up to ${ctx.config.shout.range} blocks; listeners see you at ${fmtPos(ctx.bot.entity.position)})`;
+}
+
+const PROTECTED_PLACES = new Set(['bed', 'spare_bed']);
+
+export async function markPlaceSkill(ctx: SkillContext, a: SkillArgsOf<'mark_place'>): Promise<string> {
+  const key = a.name.trim().toLowerCase().replace(/\s+/g, '_');
+  if (PROTECTED_PLACES.has(key)) return `"${key}" is set automatically when you place/claim a bed; pick another name`;
+  const p = ctx.bot.entity.position.floored();
+  ctx.memory.setPlace(key, p);
+  return `marked "${key}" at ${fmtPos(p)}; go back with goto {"place":"${key}"}`;
 }
 
 export async function writeSignSkill(ctx: SkillContext, a: SkillArgsOf<'write_sign'>): Promise<string> {
