@@ -253,11 +253,13 @@ export function isTreeLog(bot: Bot, b: Block): boolean {
 
 /** True if `p` is inside the box around a home/village spot (shelter footprint ± margin). */
 export function inHomeBox(ctx: SkillContext, p: { x: number; y: number; z: number }, margin = 3): boolean {
-  for (const key of ['home', 'village']) {
-    const h = ctx.memory.place(key);
-    if (h && Math.abs(p.x - h.x) <= margin && Math.abs(p.z - h.z) <= margin && p.y >= h.y - 1 && p.y <= h.y + 3) return true;
-  }
-  return false;
+  return homeContaining(ctx, p, margin) !== undefined;
+}
+
+/** The known home (own, village, or any teammate's) whose box contains `p`. */
+export function homeContaining(ctx: SkillContext, p: { x: number; y: number; z: number }, margin = 3): { x: number; y: number; z: number } | undefined {
+  const homes = [ctx.memory.place('home'), ctx.memory.place('village'), ...(ctx.homes?.all() ?? [])];
+  return homes.find((h) => !!h && Math.abs(p.x - h.x) <= margin && Math.abs(p.z - h.z) <= margin && p.y >= h.y - 1 && p.y <= h.y + 3) ?? undefined;
 }
 
 /** Blocks that belong to a home or protected area: never mine them. */
@@ -272,12 +274,15 @@ export function isHomeBlock(ctx: SkillContext, p: { x: number; y: number; z: num
  */
 export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y: number; z: number }): Promise<void> {
   const { bot } = ctx;
-  const home = ctx.memory.place('home');
-  if (!home) return;
   const me = bot.entity.position;
-  const meIn = inHomeBox(ctx, me, 2);
-  const targetIn = inHomeBox(ctx, target, 2);
-  if (meIn === targetIn) return;
+  const homeMe = homeContaining(ctx, me, 2);
+  const homeTarget = homeContaining(ctx, target, 2);
+  // Only when crossing a house wall: exactly one of us/target inside (or inside two different houses).
+  const same = (a?: { x: number; y: number; z: number }, b?: { x: number; y: number; z: number }): boolean =>
+    (!a && !b) || (!!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z);
+  if (same(homeMe, homeTarget)) return;
+  const home = homeMe ?? homeTarget!;
+  const meIn = same(homeMe, home);
   const doors = findBlocks(bot, Object.keys(bot.registry.blocksByName).filter((n) => n.endsWith('_door') && !n.includes('trap')), 7, 4)
     .filter((b) => Math.abs(b.position.x - home.x) <= 4 && Math.abs(b.position.z - home.z) <= 4)
     .map((b) => (bot.blockAt(b.position.offset(0, -1, 0))?.name.endsWith('_door') ? bot.blockAt(b.position.offset(0, -1, 0))! : b));

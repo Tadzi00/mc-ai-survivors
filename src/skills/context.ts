@@ -16,6 +16,8 @@ export interface SkillContext {
   log: (msg: string) => void;
   /** Protected building areas (don't break blocks there). */
   protectedAreas?: { contains(p: { x: number; y: number; z: number }): boolean };
+  /** All bots' homes (shared). */
+  homes?: { all(): Array<{ x: number; y: number; z: number }> };
 }
 
 export type SkillFn<A> = (ctx: SkillContext, args: A) => Promise<string>;

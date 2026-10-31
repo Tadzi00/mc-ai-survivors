@@ -156,3 +156,17 @@ export class ProtectedAreas {
     return this.list.some((a) => (p.x - a.x) ** 2 + (p.y - a.y) ** 2 + (p.z - a.z) ** 2 <= a.radius * a.radius);
   }
 }
+
+/** Every bot's home position (shared): nobody digs into any home, and doors are used for all of them. */
+export class HomeRegistry {
+  private readonly homes = new Map<string, Pos>();
+
+  set(name: string, p: Pos | undefined): void {
+    if (p) this.homes.set(name, { x: p.x, y: p.y, z: p.z });
+    else this.homes.delete(name);
+  }
+
+  all(): Pos[] {
+    return [...this.homes.values()];
+  }
+}

@@ -24,7 +24,7 @@ import type { CommandRunner } from '../rcon/rcon.js';
 import { lessonFrom, parseChestReport } from './memory.js';
 import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
-import { ChatLog, ProtectedAreas, Roster } from './chat.js';
+import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
 import { Memory } from './memory.js';
 import { buildObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
@@ -42,6 +42,8 @@ export interface AgentDeps {
   rcon?: CommandRunner;
   /** Protected building areas from the bridge plugin. */
   protectedAreas?: ProtectedAreas;
+  /** All bots' homes. */
+  homes?: HomeRegistry;
 }
 
 export interface AgentEvents {
@@ -210,9 +212,12 @@ export class BotAgent {
           const n = bot.blockAt(p.offset(dx, dy, dz));
           if (n && MAN_MADE_RE.test(n.name)) return 1000;
         }
-        const home = this.memory.place('home');
-        if (!home) return 0;
-        return Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4 ? 1000 : 0;
+        // any bot's home (not just ours): a visitor must use the door too
+        const homes = [this.memory.place('home'), ...(this.deps.homes?.all() ?? [])];
+        for (const home of homes) {
+          if (home && Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4) return 1000;
+        }
+        return 0;
       });
       bot.pathfinder.setMovements(moves);
       this.running = true;
@@ -288,6 +293,7 @@ export class BotAgent {
     if (this.dead) return;
     this.dead = true;
     this.deps.roster.remove(this.name);
+    this.deps.homes?.set(this.name, undefined);
     const bot = this.bot!;
     // Server death message usually arrives just before/after the death event.
     await sleep(500);
@@ -328,6 +334,7 @@ export class BotAgent {
       signal,
       log: (m) => this.log('debug', m),
       protectedAreas: this.deps.protectedAreas,
+      homes: this.deps.homes,
     };
   }
 
@@ -664,6 +671,7 @@ export class BotAgent {
     const bot = this.bot;
     if (!this.running || !bot?.entity) return;
     this.deps.roster.update(this.name, bot.entity.position);
+    this.deps.homes?.set(this.name, this.memory.place('home'));
     if (this.unsticking) return;
     // Fighting/fleeing stands still on purpose (pvp keeps the pathfinder "moving"): never "unstick" then,
     // that used to stop the pathfinder and end the fight.

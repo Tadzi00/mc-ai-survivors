@@ -431,6 +431,9 @@ are not logged (size); the hash lets you spot repeated identical situations.
   the target is outside (or the reverse), `transitHomeDoor` walks to the door, opens it, steps through and
   closes it, before normal pathfinding (`gotoNear`, `gotoXZ`, each gather target). No door found → normal
   pathfinding, which still can't dig within 4 blocks of home.
+- All bots' homes are shared (`HomeRegistry`, updated every second): the pathfinder can't dig within 4
+  blocks of ANY bot's home, and the door transit applies to any known home (own, village, teammates'),
+  so a visitor uses the door too. A bot without a home used to tunnel through a teammate's shelter wall.
 - `follow` refuses other bots ("split the work instead"); only humans can be followed. A bot used to spend
   most of its time walking behind its teammate.
 - Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge
