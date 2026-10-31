@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   }
 
   const state = new OrchestratorState(config.paths.state);
-  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster() });
+  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster(), rcon });
   manager.start();
   log('info', 'main', `orchestrator running: max ${config.population.maxBots} bots, ${config.population.smartSlots} smart slots`);
 

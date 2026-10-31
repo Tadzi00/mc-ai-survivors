@@ -188,7 +188,8 @@ export async function placeItemAt(ctx: SkillContext, item: Item, pos: Vec3): Pro
       await bot.placeBlock(ref!, f.scaled(-1));
       await sleep(60);
       return !isAirLike(bot.blockAt(pos));
-    } catch {
+    } catch (e) {
+      ctx.log(`place ${item.name} at ${fmtPos(pos)} against ${ref!.name} failed: ${(e as Error).message}`);
       await sleep(60);
       if (!isAirLike(bot.blockAt(pos))) return true;
     }

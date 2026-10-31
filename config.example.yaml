@@ -36,6 +36,7 @@ bot:
   plannerMinIntervalSeconds: 6   # min time between LLM decisions per bot
   reflexIntervalMs: 500
   skillTimeoutSeconds: 120
+  serverCrafting: true          # craft via RCON (mineflayer window crafting desyncs on 1.21.x)
   scanRadius: 24                 # radius for "nearby blocks/entities" in observations
   coldThresholdC: 5              # below this (and not comfortable) the "cold" reflex fires
   temperatureCheckSeconds: 30    # RCON /temp raw poll per bot (only if RealisticSeasons is installed)

@@ -11,6 +11,8 @@ export interface ProgressFacts {
   homeKnown: boolean;
   bedKnown: boolean;
   spareBedKnown: boolean;
+  /** Current food bar 0-20 (optional). */
+  hunger?: number;
   /** true when the bot is in a sealed, comfortable room (from RealisticSeasons), undefined if unknown */
   warmHome?: boolean;
 }
@@ -129,7 +131,12 @@ export function milestones(f: ProgressFacts): Milestone[] {
 /** Compact text block for the observation. */
 export function progressText(f: ProgressFacts): string {
   const ms = milestones(f);
-  const next = ms.find((m) => !m.done);
+  let next = ms.find((m) => !m.done);
+  // Hungry with nothing to eat beats every other step.
+  if (f.hunger !== undefined && f.hunger <= 10 && f.foodCount === 0) {
+    next = ms.find((m) => m.id === 'food') ?? next;
+    if (next) next = { ...next, label: `FOOD - you are hungry (${f.hunger}/20) and have nothing to eat` };
+  }
   const line = ms.map((m) => `${m.done ? '[x]' : '[ ]'} ${m.label}`).join('  ');
   if (!next) return `PROGRESS: ${line}\nAll basics done. Keep food stocked, help teammates, write signs/books with what you learned.`;
   return `PROGRESS: ${line}\nNEXT STEP (${next.label}): ${next.hint}`;

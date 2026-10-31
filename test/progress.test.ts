@@ -42,3 +42,11 @@ describe('progress ladder', () => {
     expect(progressText({ ...f, bedKnown: true, spareBedKnown: true })).toContain('All basics done');
   });
 });
+
+describe('hunger override', () => {
+  it('puts food first when hungry with nothing to eat', () => {
+    const f: ProgressFacts = { ...empty, hunger: 8, items: { spruce_log: 2 } };
+    expect(progressText(f)).toContain('NEXT STEP (FOOD - you are hungry (8/20)');
+    expect(progressText({ ...f, hunger: 16 })).toContain('NEXT STEP (wood');
+  });
+});

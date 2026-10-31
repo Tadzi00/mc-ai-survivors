@@ -13,12 +13,14 @@ import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
 import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
-import { eatSkill, sleepSkill } from '../skills/impl/survival.js';
+import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { placeTorchSkill } from '../skills/impl/building.js';
 import { JsonlLog, log, shortHash } from '../util/log.js';
 import { AbortError, sleep, TimeoutError } from '../util/time.js';
 import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './action.js';
 import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
+import { enableServerCrafting } from '../skills/impl/resources.js';
+import type { CommandRunner } from '../rcon/rcon.js';
 import { lessonFrom } from './memory.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, Roster } from './chat.js';
@@ -35,6 +37,8 @@ export interface AgentDeps {
   seasons: SeasonsApi;
   /** Positions of all bots in this orchestrator (shout range for bots out of entity view). */
   roster: Roster;
+  /** Server console (RCON), used for server-side crafting. */
+  rcon?: CommandRunner;
 }
 
 export interface AgentEvents {
@@ -69,7 +73,11 @@ const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit']);
 /** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
 
+const PREY = ['cow', 'pig', 'sheep', 'chicken', 'rabbit'];
+const PREY_LABELS = new Set(PREY.map((p) => `${p}s`));
+
 const REFLEX_COOLDOWN_MS: Partial<Record<Reflex, number>> = {
+  hunt: 20_000,
   eat: 5_000,
   sleep: 60_000,
   warm_torch: 120_000,
@@ -103,6 +111,8 @@ export class BotAgent {
   private pendingAliveReply: { to: string; until: number } | undefined;
   /** For !think. */
   private lastThought = '';
+  /** A player whose private message we're answering: the next "say" is whispered back to them. */
+  private replyTo: string | undefined;
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -162,6 +172,7 @@ export class BotAgent {
       moves.canDig = true;
       moves.allowParkour = false; // fewer fatal falls
       moves.allowSprinting = true;
+      if (this.deps.rcon && this.deps.config.bot.serverCrafting) enableServerCrafting(bot, this.name, this.deps.rcon);
       // Use doors instead of digging through walls (Paper handles door opening fine).
       moves.canOpenDoors = true;
       // Never dig through our own (or a known) shelter: breaking blocks near home costs a fortune.
@@ -456,9 +467,16 @@ export class BotAgent {
     }
     this.chat.offerDirect(from, msg);
     this.jsonl.write('heard', { from, text: msg, direct: true });
+    // Simple factual questions get an instant, correct answer from code (no model needed).
+    if (/where (are|r) (you|u)|your (location|position|coords)|coordinates/i.test(msg)) {
+      const p = bot.entity.position;
+      const sky = bot.blockAt(p.offset(0, 1.6, 0))?.skyLight ?? 15;
+      reply(`I'm at ${fmtPos(p)}${sky < 6 ? ' (underground)' : ''}, health ${Math.round(bot.health)}/20, food ${bot.food}/20.`);
+    }
     // React now: stop the current action and re-plan with the message in view.
     this.planQueue = [];
-    this.planNote = `${from} sent you a private message - answer with "say" or follow it`;
+    this.replyTo = from;
+    this.planNote = `${from} sent you a PRIVATE message: "${msg.slice(0, 160)}". Answer THAT message directly in "say" (it is sent privately to ${from}); if it is an instruction, follow it`;
     if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
       this.interruptedBy = `message from ${from}`;
       this.skillAbort.abort();
@@ -620,6 +638,13 @@ export class BotAgent {
     this.jsonl.write('idle', { what, skill: this.currentSkill ?? null, pos: { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) } });
   }
 
+  private nearestPrey(maxDist = 48): Entity | undefined {
+    const bot = this.bot!;
+    return Object.values(bot.entities)
+      .filter((e) => !!e.name && PREY.includes(e.name) && !!e.position && e.position.distanceTo(bot.entity.position) <= maxDist)
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0];
+  }
+
   private hostilesWithin(radius: number): Entity[] {
     const bot = this.bot!;
     return Object.values(bot.entities).filter(
@@ -685,6 +710,7 @@ export class BotAgent {
       inWater: feet?.name === 'water' || head?.name === 'water',
       hostile: hostile ? { distance: hostile.position.distanceTo(bot.entity.position), type: hostile.name ?? 'mob' } : undefined,
       nearbyHostiles: this.hostilesWithin(10).length,
+      preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),
       helpCall:
         this.helpCall && Date.now() - this.helpCall.at < 90_000
           ? { distance: bot.entity.position.distanceTo(bot.entity.position.clone().set(this.helpCall.pos.x, this.helpCall.pos.y, this.helpCall.pos.z)) }
@@ -716,7 +742,7 @@ export class BotAgent {
       this.skillAbort.abort();
     }
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : choice === 'assist' ? 50_000 : 25_000);
+    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : choice === 'assist' || choice === 'hunt' ? 90_000 : 25_000);
     const started = Date.now();
     let result = '';
     try {
@@ -803,6 +829,25 @@ export class BotAgent {
           if (d <= 6) bot.chat(`${call.from}, I'm here to help!`);
         }
         return d <= 6 ? `reached ${call.from}` : `running to ${call.from}, ${Math.round(d)}m left`;
+      }
+      case 'hunt': {
+        // Nearest visible prey, else the nearest remembered herd; attackSkill walks there and fights.
+        const prey = this.nearestPrey();
+        let target = prey?.name;
+        if (!target) {
+          const me = bot.entity.position;
+          const herd = (this.memory.data.discoveries ?? [])
+            .filter((d) => PREY_LABELS.has(d.what))
+            .sort((p, q) => Math.hypot(p.x - me.x, p.z - me.z) - Math.hypot(q.x - me.x, q.z - me.z))[0];
+          target = herd?.what.replace(/s$/, '');
+        }
+        if (!target) return 'no prey known';
+        const r = await attackSkill(ctx, { target });
+        // pick up the drops lying where it died
+        await sleep(600, signal).catch(() => undefined);
+        const drop = Object.values(bot.entities).find((e) => e.name === 'item' && e.position.distanceTo(bot.entity.position) < 8);
+        if (drop) await gotoNear(ctx, drop.position.x, drop.position.y, drop.position.z, 0, 6_000).catch(() => undefined);
+        return `hunted ${target}: ${r}`;
       }
       case 'eat':
         return eatSkill(ctx);
@@ -897,12 +942,15 @@ export class BotAgent {
       });
       if (parsed.ok) {
         this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
+        const answeringTo = this.replyTo;
+        this.replyTo = undefined;
         if (parsed.learned && this.memory.learn(`Conclusion: ${parsed.learned}`)) {
           this.log('info', `concluded: ${parsed.learned}`);
           this.jsonl.write('conclusion', { text: parsed.learned });
         }
         if (parsed.say && this.bot) {
-          this.bot.chat(parsed.say);
+          if (answeringTo) this.bot.whisper(answeringTo, parsed.say);
+          else this.bot.chat(parsed.say);
           this.lastSpokeAt = Date.now();
           this.log('info', `says: ${parsed.say}`);
           this.jsonl.write('said', { text: parsed.say });

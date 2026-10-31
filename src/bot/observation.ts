@@ -175,6 +175,7 @@ function progressFor(o: ObservationInput): string {
     homeKnown: !!memory.place('home'),
     bedKnown: !!memory.place('bed'),
     spareBedKnown: !!memory.place('spare_bed'),
+    hunger: bot.food,
     warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
   });
 }

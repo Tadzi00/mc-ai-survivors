@@ -1,5 +1,6 @@
 import type { Block } from 'prismarine-block';
 import type { Recipe } from 'prismarine-recipe';
+import type { CommandRunner } from '../../rcon/rcon.js';
 import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
@@ -121,6 +122,9 @@ async function grabValuableOres(ctx: SkillContext, gathering: string[], skip: Ma
   }
 }
 
+/** Crafting tables we could not reach (position keys). */
+const badTables = new Set<string>();
+
 /** Why the last ensureCraftingTable call failed (shown to the model), per bot. */
 const tableProblem = new WeakMap<Bot, string>();
 
@@ -128,8 +132,21 @@ const tableProblem = new WeakMap<Bot, string>();
 export async function ensureCraftingTable(ctx: SkillContext): Promise<Block | undefined> {
   const { bot } = ctx;
   tableProblem.delete(bot);
-  const existing = nearestBlock(bot, ['crafting_table'], 24);
-  if (existing) return existing;
+  // Use a table that is already in reach, or one we can walk to quickly; tables other bots left on trees
+  // or ledges used to make every craft time out.
+  const existing = findBlocks(bot, ['crafting_table'], 24, 6).filter((b) => !badTables.has(posKey(b)));
+  for (const t of existing) {
+    if (bot.entity.position.distanceTo(t.position.offset(0.5, 0.5, 0.5)) <= 4) return t;
+  }
+  for (const t of existing.slice(0, 2)) {
+    try {
+      await gotoNear(ctx, t.position.x, t.position.y, t.position.z, 2, 10_000);
+      if (bot.entity.position.distanceTo(t.position.offset(0.5, 0.5, 0.5)) <= 4.5) return t;
+    } catch {
+      if (ctx.signal.aborted) throw new AbortError();
+    }
+    badTables.add(posKey(t)); // unreachable: don't try it again this session
+  }
   if (countItem(bot, 'crafting_table') === 0) {
     if (countItem(bot, /_planks$/) < 4) await craftPlanksFromLogs(bot, 1);
     const id = bot.registry.itemsByName.crafting_table!.id;
@@ -198,12 +215,59 @@ async function clearCraftingGrid(bot: Bot): Promise<void> {
 
 /** Every craft goes through here: grid emptied before and after, so leftovers can't become buttons/tables. */
 async function craftClean(bot: Bot, recipe: Recipe, times: number, table: Block | null | undefined): Promise<void> {
+  const srv = serverCrafting.get(bot);
+  if (srv) return serverCraft(bot, recipe, times, table, srv);
   await clearCraftingGrid(bot);
   try {
     await bot.craft(recipe, times, table ?? undefined);
   } finally {
     await clearCraftingGrid(bot);
   }
+}
+
+/**
+ * SERVER-SIDE CRAFTING (default, see DESIGN.md): mineflayer's window-click crafting desyncs on 1.21.x
+ * (count-0 ghost stacks, planks turning into buttons, items dropped on the ground). Instead we check the
+ * same rules (ingredients in the inventory; a placed crafting table within reach for 3x3 recipes) and let
+ * the server swap ingredients for the result over RCON in one go, rolling back on any shortfall.
+ */
+const serverCrafting = new WeakMap<Bot, { name: string; rcon: CommandRunner }>();
+
+export function enableServerCrafting(bot: Bot, name: string, rcon: CommandRunner): void {
+  serverCrafting.set(bot, { name, rcon });
+}
+
+async function serverCraft(bot: Bot, recipe: Recipe, times: number, table: Block | null | undefined, srv: { name: string; rcon: CommandRunner }): Promise<void> {
+  if (recipe.requiresTable && (!table || bot.entity.position.distanceTo(table.position.offset(0.5, 0.5, 0.5)) > 4.5)) {
+    throw new Error('crafting table not within reach');
+  }
+  const need = new Map<string, number>();
+  for (const d of recipe.delta) {
+    if (d.count >= 0) continue;
+    const n = bot.registry.items[d.id]?.name;
+    if (!n) throw new Error('unknown ingredient');
+    need.set(n, (need.get(n) ?? 0) + -d.count * times);
+  }
+  for (const [n, c] of need) if (countItem(bot, n) < c) throw new Error('missing ingredient');
+  const removed: Array<[string, number]> = [];
+  const rollback = async (): Promise<void> => {
+    for (const [n, c] of removed) await srv.rcon.send(`give ${srv.name} minecraft:${n} ${c}`).catch(() => undefined);
+  };
+  for (const [n, c] of need) {
+    const out = await srv.rcon.send(`clear ${srv.name} minecraft:${n} ${c}`);
+    const got = Number(/Removed (\d+)/i.exec(out)?.[1] ?? 0);
+    if (got > 0) removed.push([n, got]);
+    if (got < c) {
+      await rollback();
+      throw new Error('missing ingredient');
+    }
+  }
+  const result = bot.registry.items[recipe.result.id]?.name;
+  if (!result) {
+    await rollback();
+    throw new Error('unknown result');
+  }
+  await srv.rcon.send(`give ${srv.name} minecraft:${result} ${recipe.result.count * times}`);
 }
 
 /**
@@ -271,7 +335,11 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
       if (needsTable) {
         table = await ensureCraftingTable(ctx);
         if (table) {
-          await gotoNear(ctx, table.position.x, table.position.y, table.position.z, 2, 30_000);
+          // Crafting only needs the table within reach; walking "near" a table we just placed next to us
+          // can make the pathfinder hang.
+          if (bot.entity.position.distanceTo(table.position.offset(0.5, 0.5, 0.5)) > 4) {
+            await gotoNear(ctx, table.position.x, table.position.y, table.position.z, 2, 30_000);
+          }
           recipe = bot.recipesFor(item.id, null, 1, table)[0];
         }
       }
@@ -279,9 +347,14 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
     if (recipe) {
       const times = Math.ceil(a.count / recipe.result.count);
       await craftWithRetry(ctx, item.id, recipe, times, table);
-      await sleep(300); // inventory update arrives after the craft resolves
-      const made = countItem(bot, item.name) - before;
-      return `crafted ${made > 0 ? made : times * recipe.result.count} ${item.name} (now have ${countItem(bot, item.name)})`;
+      // The inventory update arrives after the craft resolves: wait up to 1.5 s, then report the TRUTH.
+      let made = 0;
+      for (let i = 0; i < 6 && made <= 0; i++) {
+        await sleep(250);
+        made = countItem(bot, item.name) - before;
+      }
+      if (made <= 0) return `cannot craft ${item.name}: the craft did not go through (nothing was made); try again or move`;
+      return `crafted ${made} ${item.name} (now have ${countItem(bot, item.name)})`;
     }
     if (attempt === 0) {
       await autoIntermediates(ctx, item.name);

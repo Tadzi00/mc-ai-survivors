@@ -93,6 +93,7 @@ export const ConfigSchema = z
         plannerMinIntervalSeconds: z.number().min(0).default(6),
         reflexIntervalMs: z.number().int().min(100).default(500),
         skillTimeoutSeconds: z.number().min(5).default(120),
+        serverCrafting: z.boolean().default(true),
         scanRadius: z.number().int().min(4).max(64).default(24),
         coldThresholdC: z.number().default(5),
         temperatureCheckSeconds: z.number().min(5).default(30),

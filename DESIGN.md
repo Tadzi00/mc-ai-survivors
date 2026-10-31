@@ -191,7 +191,9 @@ Humans (not bots) can `/msg <bot> ...`:
 - `!forget <text>`: removes every note, lesson, discovery, place, heard message, goal and the current plan
   mentioning `<text>` (e.g. a dead bot's name).
 - anything else: a private message the bot always hears (any distance), shown as `<Player -> YOU>`; the
-  current action is interrupted and the bot re-plans right away.
+  current action is interrupted and the bot re-plans right away. Its `say` in that reply is whispered back
+  to the player (not public chat). "where are you"-type questions are answered instantly from code with
+  the real position, health and food.
 
 ### 6.2 Signs and books
 
@@ -233,7 +235,31 @@ were missing (e.g. hunting cows in a cave). Conclusions can be wrong; that is pa
 Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merged into one
 "Older notes:" line), no LLM summarization, so memory can't be corrupted by a bad model call.
 
+### 6.6 Food
+
+- `eat` reflex when food <= 14 (or hurt and not full) and there is food.
+- **`hunt` reflex** when food <= 6, nothing to eat, and prey (cow/pig/sheep/chicken/rabbit) is visible within
+  48 blocks or remembered: attack it (walking to a remembered herd if needed), then pick up the drops.
+  Cooldown 20 s. The progress ladder's NEXT STEP becomes FOOD whenever food <= 10 and there is nothing to eat.
+  **Why:** a bot starved while the model kept choosing "gather wood".
+
 ## 7. Server access: RCON
+
+### 7.1 Server-side crafting (`bot.serverCrafting`, default true)
+
+mineflayer's window-click crafting desyncs on 1.21.x: ghost stacks with count 0, leftover planks turning
+into buttons/crafting tables, items dropped on the ground, crafted tools that never appear. Crafting now
+checks the SAME rules in code (ingredients in the inventory; for 3x3 recipes a placed crafting table within
+4.5 blocks, placing/walking to one first) and then swaps ingredients for the result via RCON
+(`clear <bot> <item> <n>` per ingredient, rolled back on any shortfall, then `give`). Smelting still uses
+the furnace window. `scripts/craft-test.mjs` is a live smoke test. Results are only reported as
+"crafted" when the item count really went up.
+
+### 7.2 Spawn protection must be 0
+
+Bots are not ops; with the vanilla default `spawn-protection=16` they cannot place or break ANY block within
+16 blocks of world spawn, which is exactly where they start (tables "refused", logs "unreachable", shelters
+failing). `docker-compose.yml` sets `SPAWN_PROTECTION: 0`.
 
 Bots are **not** op. Everything privileged goes through one serialized RCON connection
 (`src/rcon/rcon.ts`): `survivors ...` (bridge), `temp raw` / `room raw` (RealisticSeasons, queried
