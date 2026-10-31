@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
+import { countItem, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { placeTorchSkill } from '../skills/impl/building.js';
@@ -41,6 +41,9 @@ export interface AgentEvents {
 /** Entity metadata index 0 is a bit field; bit 0x01 = on fire. */
 const isOnFire = (flags: unknown): boolean => typeof flags === 'number' && (flags & 0x01) === 1;
 
+/** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
+const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
+
 const REFLEX_COOLDOWN_MS: Partial<Record<Reflex, number>> = {
   eat: 5_000,
   sleep: 60_000,
@@ -63,6 +66,10 @@ export class BotAgent {
   private planningSince = 0;
   private posHistory: Array<{ t: number; x: number; y: number; z: number }> = [];
   private lastIdleWarn = 0;
+  /** Stuck-while-walking detection (see unstickTick). */
+  private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
+  private stuckTries = 0;
+  private unsticking = false;
   private dead = false;
   private skillAbort: AbortController | undefined;
   private currentSkill: string | undefined;
@@ -126,6 +133,7 @@ export class BotAgent {
       this.events.onSpawn(this);
       this.timers.push(setInterval(() => void this.reflexTick(), this.deps.config.bot.reflexIntervalMs));
       this.timers.push(setInterval(() => this.idleWatchdog(), 10_000));
+      this.timers.push(setInterval(() => void this.unstickTick(), 1_000));
       this.timers.push(setInterval(() => void this.temperatureTick(), this.deps.config.bot.temperatureCheckSeconds * 1000));
       void this.temperatureTick();
       void this.plannerLoop();
@@ -220,6 +228,60 @@ export class BotAgent {
   }
 
   // ---------------------------------------------------------------- reflexes
+  /**
+   * The pathfinder sometimes keeps "walking" into a block (corner it can't pass, block that appeared on
+   * the route). If it is moving but the bot hasn't advanced 0.3 blocks in 3 s: dig the block in front at
+   * head/feet height (never near home or utility blocks), else jump. After 3 tries, stop the pathfinder so
+   * the skill fails and picks something else.
+   */
+  private async unstickTick(): Promise<void> {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity || this.unsticking) return;
+    if (!bot.pathfinder.isMoving() || bot.isSleeping) {
+      this.moveTrack = [];
+      this.stuckTries = 0;
+      return;
+    }
+    const now = Date.now();
+    const p = bot.entity.position;
+    this.moveTrack.push({ t: now, x: p.x, y: p.y, z: p.z });
+    this.moveTrack = this.moveTrack.filter((h) => now - h.t <= 3_500);
+    if (now - this.moveTrack[0]!.t < 2_900) return;
+    const moved = Math.max(...this.moveTrack.map((h) => Math.hypot(h.x - p.x, h.y - p.y, h.z - p.z)));
+    if (moved >= 0.3) {
+      this.stuckTries = 0;
+      return;
+    }
+    this.unsticking = true;
+    this.moveTrack = [];
+    this.stuckTries++;
+    try {
+      if (this.stuckTries > 3) {
+        this.log('info', `stuck at ${fmtPos(p)} - giving up on this path`);
+        this.jsonl.write('stuck', { pos: { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) }, action: 'gave_up' });
+        bot.pathfinder.stop();
+        this.stuckTries = 0;
+        return;
+      }
+      const yaw = bot.entity.yaw;
+      const front = p.offset(-Math.sin(yaw), 0, -Math.cos(yaw)).floored();
+      const home = this.memory.place('home');
+      const nearHome = !!home && Math.hypot(front.x - home.x, front.z - home.z) < 6;
+      for (const b of [bot.blockAt(front.offset(0, 1, 0)), bot.blockAt(front)]) {
+        if (!b || b.boundingBox !== 'block' || nearHome || NEVER_DIG.test(b.name) || !bot.canDigBlock(b)) continue;
+        this.jsonl.write('stuck', { pos: { x: front.x, y: front.y, z: front.z }, action: `dig ${b.name}` });
+        await bot.dig(b, true).catch(() => undefined);
+        return;
+      }
+      this.jsonl.write('stuck', { pos: { x: front.x, y: front.y, z: front.z }, action: 'jump' });
+      bot.setControlState('jump', true);
+      await sleep(400);
+      bot.setControlState('jump', false);
+    } finally {
+      this.unsticking = false;
+    }
+  }
+
   /**
    * Warns (log + jsonl "idle") when the bot hasn't moved for 30 s and isn't sleeping, saying what it is
    * waiting on, so stuck bots get noticed. Diagnostic only; it does not change behaviour.

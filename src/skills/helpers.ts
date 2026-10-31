@@ -87,10 +87,50 @@ async function gotoWithRetry(ctx: SkillContext, goal: () => pathfinderPkg.goals.
   }
 }
 
-/** Pathfind near a position; aborts with the skill signal; bounded by timeout. */
+/** A position a bot can stand in: feet and head not solid (and not lava), solid ground below. */
+export function isStandable(bot: Bot, p: Vec3): boolean {
+  const feet = bot.blockAt(p);
+  const head = bot.blockAt(p.offset(0, 1, 0));
+  const below = bot.blockAt(p.offset(0, -1, 0));
+  const free = (b: Block | null): boolean => !!b && b.boundingBox === 'empty' && b.name !== 'lava';
+  return free(feet) && free(head) && isSolid(below);
+}
+
+/** Nearest standable position within `radius` blocks of `p` (closest first), or undefined. */
+export function nearestStandable(bot: Bot, p: Vec3, radius = 3): Vec3 | undefined {
+  const base = p.floored();
+  let best: Vec3 | undefined;
+  let bestD = Infinity;
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const c = base.offset(dx, dy, dz);
+        const d = dx * dx + dy * dy * 2 + dz * dz; // prefer same height
+        if (d < bestD && isStandable(bot, c)) {
+          best = c;
+          bestD = d;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Pathfind near a position; aborts with the skill signal; bounded by timeout. For exact targets (range <= 1)
+ * the target must be standable; if it is inside blocks we go to the nearest free spot instead.
+ */
 export async function gotoNear(ctx: SkillContext, x: number, y: number, z: number, range = 1, timeoutMs = 60_000): Promise<void> {
   throwIfAborted(ctx.signal);
   const { bot } = ctx;
+  if (range <= 1) {
+    const target = v3(Math.floor(x), Math.floor(y), Math.floor(z));
+    if (bot.blockAt(target) && !isStandable(bot, target)) {
+      const alt = nearestStandable(bot, target, 3);
+      if (!alt) throw new Error(`target ${fmtPos(target)} is inside blocks and there is no free spot near it`);
+      ({ x, y, z } = alt);
+    }
+  }
   const onAbort = (): void => bot.pathfinder.stop();
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   try {
