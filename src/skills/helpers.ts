@@ -299,7 +299,11 @@ export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y:
     .filter((b) => Math.abs(b.position.x - home.x) <= 4 && Math.abs(b.position.z - home.z) <= 4)
     .map((b) => (bot.blockAt(b.position.offset(0, -1, 0))?.name.endsWith('_door') ? bot.blockAt(b.position.offset(0, -1, 0))! : b));
   const door = doors[0];
-  if (!door) return;
+  if (!door) {
+    ctx.log(`door transit: no door found near home ${fmtPos(home)}`);
+    return;
+  }
+  ctx.log(`door transit: ${meIn ? 'leaving' : 'entering'} via door at ${fmtPos(door.position)}`);
   const d = door.position;
   // Outward direction: from home towards the door, along the dominant axis.
   const dx = d.x - home.x, dz = d.z - home.z;
@@ -312,11 +316,32 @@ export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y:
     const now = bot.blockAt(d);
     if (now && (now as unknown as { getProperties(): { open?: boolean } }).getProperties().open !== true) await bot.activateBlock(now);
     await sleep(250);
-    await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(to.x, to.y, to.z)), 8_000, 'door');
+    // Walk straight through the open doorway by hand: the pathfinder's own door logic toggles (closes) a door
+    // that is already open and then gives up.
+    await walkStraight(bot, to, 4_000);
     const after = bot.blockAt(d);
     if (after && (after as unknown as { getProperties(): { open?: boolean } }).getProperties().open === true) await bot.activateBlock(after);
-  } catch {
+  } catch (e) {
     if (ctx.signal.aborted) throw new AbortError();
-    // fall back to normal pathfinding
+    ctx.log(`door transit via ${fmtPos(d)} failed: ${(e as Error).message}`); // fall back to normal pathfinding
+  }
+}
+
+/** Walks in a straight line (no pathfinding) towards `to` until within 0.6 blocks or `ms` elapsed. */
+export async function walkStraight(bot: Bot, to: Vec3, ms: number): Promise<boolean> {
+  const target = to.offset(0.5, 0, 0.5);
+  const end = Date.now() + ms;
+  bot.pathfinder.stop();
+  try {
+    while (Date.now() < end) {
+      const p = bot.entity.position;
+      if (Math.hypot(p.x - target.x, p.z - target.z) < 0.6) return true;
+      await bot.lookAt(target.offset(0, 1.6, 0), true);
+      bot.setControlState('forward', true);
+      await sleep(100);
+    }
+    return false;
+  } finally {
+    bot.setControlState('forward', false);
   }
 }

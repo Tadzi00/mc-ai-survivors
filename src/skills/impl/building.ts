@@ -1,10 +1,10 @@
 import type { Item } from 'prismarine-item';
 import type { Block } from 'prismarine-block';
-import { throwIfAborted } from '../../util/time.js';
+import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import {
-  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, MAN_MADE_RE, placeItemAt, v3, type Vec3,
+  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, placeItemAt, v3, type Vec3,
 } from '../helpers.js';
 import { craftSkill } from './resources.js';
 
@@ -257,38 +257,59 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
   const { bot } = ctx;
   const bedItem = findItem(bot, /_bed$/);
   if (!bedItem) return 'no bed item (craft "white_bed": 3 white_wool + 3 planks)';
+  // A bed needs two free floor cells in a line (foot, head). Its head points the way the player faces, so
+  // stand on the cell behind the foot and place it facing forward. Works in a 3x3 room (corners/edges).
   const base = bot.entity.position.floored();
   const dirs = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)];
-  for (const d of dirs) {
-    const foot = base.plus(d);
-    const head = foot.plus(d);
-    if (!isAirLike(bot.blockAt(foot)) || !isAirLike(bot.blockAt(head))) continue;
-    if (!isSolid(bot.blockAt(foot.offset(0, -1, 0))) || !isSolid(bot.blockAt(head.offset(0, -1, 0)))) continue;
-    throwIfAborted(ctx.signal);
-    // The bed's head extends away from the player, i.e. in direction d.
-    await bot.lookAt(head.offset(0.5, 0, 0.5), true);
-    await bot.equip(bedItem, 'hand');
-    try {
-      await bot.placeBlock(bot.blockAt(foot.offset(0, -1, 0))!, v3(0, 1, 0));
-    } catch {
-      /* verify below */
+  const free = (p: Vec3): boolean => isAirLike(bot.blockAt(p)) && isAirLike(bot.blockAt(p.offset(0, 1, 0))) && isSolid(bot.blockAt(p.offset(0, -1, 0)));
+  const options: Array<{ foot: Vec3; head: Vec3; stand: Vec3; d: Vec3; cost: number }> = [];
+  for (let dx = -3; dx <= 3; dx++) {
+    for (let dz = -3; dz <= 3; dz++) {
+      for (const dy of [0, -1, 1]) {
+        const foot = base.offset(dx, dy, dz);
+        for (const d of dirs) {
+          const head = foot.plus(d);
+          const stand = foot.minus(d);
+          if (!free(foot) || !free(head) || !isStandable(bot, stand)) continue;
+          options.push({ foot, head, stand, d, cost: stand.distanceTo(base) + (dy !== 0 ? 3 : 0) });
+        }
+      }
     }
-    const placed = bot.blockAt(foot);
+  }
+  options.sort((p, q) => p.cost - q.cost);
+  for (const o of options.slice(0, 4)) {
+    throwIfAborted(ctx.signal);
+    if (!o.stand.equals(base)) {
+      try {
+        await gotoNear(ctx, o.stand.x, o.stand.y, o.stand.z, 0, 15_000);
+      } catch {
+        continue;
+      }
+    }
+    await bot.equip(bedItem, 'hand');
+    await bot.lookAt(o.head.offset(0.5, 0.2, 0.5), true);
+    try {
+      await bot.placeBlock(bot.blockAt(o.foot.offset(0, -1, 0))!, v3(0, 1, 0));
+    } catch (e) {
+      ctx.log(`bed at ${fmtPos(o.foot)}: ${(e as Error).message}`);
+    }
+    await sleep(200);
+    const placed = bot.blockAt(o.foot);
     if (placed && bot.isABed(placed)) {
       const claimed = ctx.memory.place('bed');
       if (!claimed) {
         // First bed: claim it (bridge auto-assigns on bed use); later beds stay free for newborns.
         await bot.activateBlock(placed).catch(() => undefined);
-        ctx.memory.setPlace('bed', foot);
-        if (!ctx.memory.place('home')) ctx.memory.setPlace('home', { ...foot, note: 'where my bed is' }); // a bed makes a home
-        return `placed and claimed my bed at ${fmtPos(foot)}`;
+        ctx.memory.setPlace('bed', o.foot);
+        if (!ctx.memory.place('home')) ctx.memory.setPlace('home', { ...o.foot, note: 'where my bed is' }); // a bed makes a home
+        return `placed and claimed my bed at ${fmtPos(o.foot)}`;
       }
-      ctx.memory.addNote(`Spare bed for a newborn at ${fmtPos(foot)}.`);
-      ctx.memory.setPlace('spare_bed', foot);
-      return `placed spare bed at ${fmtPos(foot)} (left unclaimed for a newborn)`;
+      ctx.memory.addNote(`Spare bed for a newborn at ${fmtPos(o.foot)}.`);
+      ctx.memory.setPlace('spare_bed', o.foot);
+      return `placed spare bed at ${fmtPos(o.foot)} (left unclaimed for a newborn)`;
     }
   }
-  return 'no room for a bed here (needs 2 free floor blocks in a line next to me)';
+  return options.length ? 'could not place the bed (tried the free spots nearby)' : 'no room for a bed here (needs 2 free floor blocks in a line, plus a spot to stand behind them)';
 }
 
 /**

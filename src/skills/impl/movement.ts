@@ -24,7 +24,10 @@ export async function gotoSkill(ctx: SkillContext, a: SkillArgsOf<'goto'>): Prom
   } else {
     await gotoNear(ctx, x, y, z, 1, 90_000);
   }
-  return `arrived near ${fmtPos(ctx.bot.entity.position)}`;
+  const p = ctx.bot.entity.position;
+  const d = Math.hypot(p.x - x, p.z - z);
+  // Report the truth: the pathfinder can "finish" short of the goal.
+  return d <= 3 ? `arrived near ${fmtPos(p)}` : `stopped at ${fmtPos(p)}, ${Math.round(d)} blocks short of the target (blocked?)`;
 }
 
 export async function exploreSkill(ctx: SkillContext, a: SkillArgsOf<'explore'>): Promise<string> {

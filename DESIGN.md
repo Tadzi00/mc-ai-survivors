@@ -389,6 +389,18 @@ are not logged (size); the hash lets you spot repeated identical situations.
 - Temperature is polled every `temperatureCheckSeconds`, so the cold reflex can lag that long.
 - `smelt` waits a fixed ~10 s per item and may return partial results.
 
+## 12.1 Live test harness
+
+`node scripts/harness.mjs [scenario...]` (after `npm run build`, with `.env` loaded) runs skill scenarios
+(`scripts/scenarios.mjs`) with a real mineflayer bot on a temporary 3-layer platform at x≈3000, y=200, checks
+the result through RCON (server truth) and removes everything afterwards. The bot gets the same plugins and
+movement rules as a real agent. Scenarios: signs, books, chest, smelt, craft_tools, bed_claim, door_out,
+door_in, add_door, torch, hunt, eat, sapling, farm, ore_bonus. Run it after touching skills.
+Findings it produced: beds could not be placed in a 3x3 room (now: any free foot/head pair, stand behind,
+face forward); door transit used the pathfinder through the open door, which toggled it shut (now: walk
+straight); smelt counted window results (now: inventory change, leftovers reported); goto said "arrived"
+when it stopped short (now: reports the distance).
+
 ## 13. Not bugs
 
 - A bot that dies **never comes back**, and its name is never reused.

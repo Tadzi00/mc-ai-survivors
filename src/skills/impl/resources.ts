@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, freeSpotNearBot, gotoNear, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, gotoNear, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -430,20 +430,45 @@ export async function smeltSkill(ctx: SkillContext, a: SkillArgsOf<'smelt'>): Pr
   const fuelCount = Math.min(fuelPick.count, Math.ceil(n / perFuel));
 
   const furnace = await bot.openFurnace(furnaceBlock);
-  let taken = 0;
+  // Count by inventory change (the window's reported counts were off by one sometimes).
+  const productNames = new Set<string>();
+  const snapshot = (): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const i of bot.inventory.items()) m.set(i.name, (m.get(i.name) ?? 0) + i.count);
+    return m;
+  };
+  const before = snapshot();
+  let takenByWindow = 0;
+  let leftInFurnace = 0;
   try {
     await furnace.putFuel(fuelPick.type, null, fuelCount);
     await furnace.putInput(input.type, null, n);
     const deadline = Date.now() + Math.min(n * 10_500 + 5_000, (ctx.config.bot.skillTimeoutSeconds - 10) * 1000);
-    while (taken < n && Date.now() < deadline) {
+    while (takenByWindow < n && Date.now() < deadline) {
       await sleep(2000, ctx.signal);
-      if (furnace.outputItem()) {
-        const out = await furnace.takeOutput();
-        taken += out?.count ?? 0;
+      const o = furnace.outputItem();
+      if (o) {
+        productNames.add(o.name);
+        const out = await furnace.takeOutput().catch(() => null);
+        takenByWindow += out?.count ?? 0;
       }
     }
+    // last look: grab anything finished in the meantime
+    await sleep(300);
+    const o = furnace.outputItem();
+    if (o) {
+      productNames.add(o.name);
+      await furnace.takeOutput().catch(() => null);
+    }
+    leftInFurnace = (furnace.inputItem()?.count ?? 0) + (furnace.outputItem()?.count ?? 0);
   } finally {
     furnace.close();
   }
-  return `smelted ${taken}/${n} ${inputName}`;
+  await sleep(500);
+  const after = snapshot();
+  let got = 0;
+  for (const name of productNames) got += (after.get(name) ?? 0) - (before.get(name) ?? 0);
+  const product = [...productNames][0] ?? 'nothing';
+  if (got <= 0) return `smelted nothing yet (${leftInFurnace} still in the furnace at ${fmtPos(furnaceBlock.position)}; come back and smelt again)`;
+  return `smelted ${got} ${product} from ${inputName}${leftInFurnace ? ` (${leftInFurnace} still in the furnace at ${fmtPos(furnaceBlock.position)})` : ''}`;
 }
