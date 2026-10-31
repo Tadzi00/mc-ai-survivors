@@ -15,6 +15,8 @@ export const ProviderSchema = z.discriminatedUnion('type', [
     baseUrl: z.string().url().default('http://localhost:11434'),
     /** How long Ollama keeps the model loaded (e.g. "30m"). */
     keepAlive: z.string().optional(),
+    /** Context window in tokens (num_ctx); unset = Ollama default (often 4096). Bigger = more VRAM. */
+    numCtx: z.number().int().min(1024).optional(),
     ...common,
   }),
   z.object({

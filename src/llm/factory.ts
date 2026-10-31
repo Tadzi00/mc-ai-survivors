@@ -29,7 +29,7 @@ export function createProvider(cfg: ProviderConfig, env: NodeJS.ProcessEnv = pro
   const http = { timeoutMs: cfg.timeoutMs, retries: cfg.retries, fetchImpl };
   switch (cfg.type) {
     case 'ollama':
-      return new OllamaProvider({ ...http, baseUrl: cfg.baseUrl, keepAlive: cfg.keepAlive });
+      return new OllamaProvider({ ...http, baseUrl: cfg.baseUrl, keepAlive: cfg.keepAlive, numCtx: cfg.numCtx });
     case 'openai-compatible':
       return new OpenAICompatibleProvider({
         ...http,

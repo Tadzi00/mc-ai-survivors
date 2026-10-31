@@ -77,7 +77,9 @@ export function systemPrompt(tier: Tier, name: string, chatRange: number, shout:
     .map((s) => `- ${SKILL_HELP[s]}`)
     .join('\n');
   if (tier === 'smart') {
-    return `You are ${name}, a SMART survivor bot in Minecraft and a leader of your small tribe of bots.
+    // NOTE: no bot name here: identical system prompts let Ollama reuse its prompt cache across bots.
+    // The name is in the observation ("You: <name> (...)").
+    return `You are a SMART survivor bot in Minecraft and a leader of your small tribe of bots (your name is in the observation).
 You choose ONE high-level action at a time; deterministic skills execute it. Do not micro-manage.
 ${fill(RULES_FULL, chatRange, shout)}
 
@@ -106,7 +108,7 @@ ${skills}
 
 ${SMART_FORMAT}`;
   }
-  return `You are ${name}, a survivor bot in Minecraft. Pick ONE simple action at a time.
+  return `You are a survivor bot in Minecraft (your name is in the observation). Pick ONE simple action at a time.
 ${RULES_SHORT}
 ${CHEAT_SHEET}
 ${OBEY}

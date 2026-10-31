@@ -1086,6 +1086,8 @@ export class BotAgent {
         attempt,
         ms: Date.now() - started,
         raw: res.text.slice(0, 600),
+        promptChars: system.length + messages.reduce((n, m) => n + m.content.length, 0),
+        stats: res.stats,
         ok: parsed.ok,
         error: parsed.ok ? undefined : parsed.error,
       });

@@ -15,6 +15,8 @@ export interface CompletionRequest {
 
 export interface CompletionResult {
   text: string;
+  /** Optional timing/usage info for logs (provider-specific). */
+  stats?: { promptTokens?: number; outputTokens?: number; promptMs?: number; outputMs?: number };
 }
 
 export interface LLMProvider {

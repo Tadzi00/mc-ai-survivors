@@ -376,6 +376,16 @@ Changing a contract: add a `v2` line, keep `v1` until both sides migrate.
   (default 1 — a single local GPU). Timeouts via `AbortSignal.timeout`, retries with exponential
   backoff on network errors / 408 / 429 / 5xx only.
 
+### 10.1 Latency notes (local Ollama on a 6 GB GPU)
+
+qwen2.5:7b with Ollama's default 4096 context is 5.15 GB; on an RTX 2060 shared with a Minecraft client only
+~4.2 GB fit in VRAM, the rest runs on the CPU, and a decision took 35-50 s. The smart system prompt is ~2100
+tokens; with the observation a call is ~3000 tokens, close to the 4096 default (beyond it Ollama silently
+drops the START of the prompt, i.e. the rules). The system prompt therefore contains no bot name, so bots of
+the same tier send an identical prefix that Ollama can reuse from its prompt cache. Ollama decisions log
+`stats` (prompt/output tokens and ms) and `promptChars` in each `decision` event. Providers accept
+`numCtx` to raise the context window (costs VRAM).
+
 ## 11. Logging
 
 Console: concise one-liners (`LOG_LEVEL`). JSONL per bot in `logs/<name>.jsonl`: `spawn`, `heard`,
