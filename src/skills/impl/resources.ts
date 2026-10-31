@@ -302,6 +302,12 @@ function genericWood(name: string): string {
  * spruce logs -> "spruce_planks". Other names pass through.
  */
 function woodAlias(bot: Bot, name: string): string {
+  // Bare tool names ("pickaxe", "sword") -> best tier the bot has material for.
+  const tool = /^(pickaxe|axe|sword|shovel|hoe)$/.exec(name);
+  if (tool) {
+    const tier = countItem(bot, 'iron_ingot') >= 3 ? 'iron' : countItem(bot, /^(cobblestone|cobbled_deepslate|blackstone)$/) >= 3 ? 'stone' : 'wooden';
+    return `${tier}_${tool[1]}`;
+  }
   const m = /^(?:(\w+?)_)?(planks|slab|stairs|fence|fence_gate|door|trapdoor|button|pressure_plate|sign|boat)$/.exec(name);
   if (!m) return name;
   const kind = m[2]!;
