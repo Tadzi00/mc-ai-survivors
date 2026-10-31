@@ -23,7 +23,8 @@ export const SkillArgs = {
     }),
   explore: z.object({
     direction: z.enum(['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest']).optional(),
-    distance: z.coerce.number().int().min(24).max(128).default(40), // 10-block hops found nothing new
+    // clamp, don't reject: 10-block hops found nothing new, and a rejected reply costs another model call
+    distance: z.coerce.number().int().default(40).transform((v) => Math.max(24, Math.min(128, v))),
   }),
   follow: z.object({ player: name, seconds: z.coerce.number().int().min(3).max(120).default(30) }),
   attack: z.object({ target: name }),
