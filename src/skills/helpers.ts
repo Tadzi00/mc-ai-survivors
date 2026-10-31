@@ -67,6 +67,26 @@ export function findBlocks(bot: Bot, names: string[], maxDistance: number, count
     .filter((b): b is Block => b !== null);
 }
 
+/**
+ * pathfinder.goto, retried when it is stopped almost immediately: a collect task cancelled by the previous
+ * skill can still stop the pathfinder just after a new goal is set ("Path was stopped...").
+ */
+async function gotoWithRetry(ctx: SkillContext, goal: () => pathfinderPkg.goals.Goal, timeoutMs: number, label: string): Promise<void> {
+  const { bot } = ctx;
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; ; attempt++) {
+    const started = Date.now();
+    try {
+      await withTimeout(bot.pathfinder.goto(goal()), Math.max(1000, deadline - started), label);
+      return;
+    } catch (e) {
+      const stoppedEarly = /stopped/i.test((e as Error).message) && Date.now() - started < 1500;
+      if (ctx.signal.aborted || !stoppedEarly || attempt >= 2) throw e;
+      await sleep(300);
+    }
+  }
+}
+
 /** Pathfind near a position; aborts with the skill signal; bounded by timeout. */
 export async function gotoNear(ctx: SkillContext, x: number, y: number, z: number, range = 1, timeoutMs = 60_000): Promise<void> {
   throwIfAborted(ctx.signal);
@@ -74,7 +94,7 @@ export async function gotoNear(ctx: SkillContext, x: number, y: number, z: numbe
   const onAbort = (): void => bot.pathfinder.stop();
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   try {
-    await withTimeout(bot.pathfinder.goto(new goals.GoalNear(x, y, z, range)), timeoutMs, 'goto');
+    await gotoWithRetry(ctx, () => new goals.GoalNear(x, y, z, range), timeoutMs, 'goto');
   } catch (e) {
     bot.pathfinder.stop();
     if (ctx.signal.aborted) throw new AbortError();
@@ -89,7 +109,7 @@ export async function gotoXZ(ctx: SkillContext, x: number, z: number, timeoutMs 
   const onAbort = (): void => bot.pathfinder.stop();
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   try {
-    await withTimeout(bot.pathfinder.goto(new goals.GoalNearXZ(x, z, 2)), timeoutMs, 'explore');
+    await gotoWithRetry(ctx, () => new goals.GoalNearXZ(x, z, 2), timeoutMs, 'explore');
   } catch (e) {
     bot.pathfinder.stop();
     if (ctx.signal.aborted) throw new AbortError();

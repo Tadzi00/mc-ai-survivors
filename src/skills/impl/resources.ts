@@ -1,4 +1,5 @@
 import type { Block } from 'prismarine-block';
+import type { Recipe } from 'prismarine-recipe';
 import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
@@ -67,7 +68,8 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
         if (ctx.signal.aborted) throw new AbortError();
         failures++;
         skip.set(posKey(target), Date.now() + SKIP_MS);
-        await bot.collectBlock.cancelTask().catch(() => undefined);
+        // Never await cancelTask: it waits for the task to wind down and can hang if pathfinding is stuck.
+        void bot.collectBlock.cancelTask().catch(() => undefined);
         bot.pathfinder.stop();
         ctx.log(`collect failed at ${posKey(target)}: ${(e as Error).message}`);
       }
@@ -122,9 +124,54 @@ async function autoIntermediates(ctx: SkillContext, itemName: string): Promise<v
   }
 }
 
+/**
+ * bot.craft right after another craft often fails with "missing ingredient" because the client inventory
+ * hasn't caught up with the server yet. Wait a bit, re-pick the recipe and retry.
+ */
+async function craftWithRetry(ctx: SkillContext, itemId: number, first: Recipe, times: number, table: Block | undefined): Promise<void> {
+  const { bot } = ctx;
+  let recipe = first;
+  for (let i = 0; ; i++) {
+    try {
+      await bot.craft(recipe, times, table);
+      return;
+    } catch (e) {
+      if (i >= 2 || !/missing ingredient/i.test((e as Error).message)) throw e;
+      throwIfAborted(ctx.signal);
+      await sleep(500 * (i + 1));
+      recipe = bot.recipesFor(itemId, null, 1, table ?? null)[0] ?? recipe;
+    }
+  }
+}
+
+/** "oak_planks" -> "planks (any wood)": recipes accept any wood type, so don't name a random one. */
+function genericWood(name: string): string {
+  if (/_planks$/.test(name)) return 'planks (any wood, craft from logs)';
+  if (/_log$/.test(name)) return 'logs (any wood)';
+  return name;
+}
+
+/**
+ * Maps wood-specific requests to the wood the bot actually has: "planks" / "pale_oak_planks" with only
+ * spruce logs -> "spruce_planks". Other names pass through.
+ */
+function woodAlias(bot: Bot, name: string): string {
+  const m = /^(?:(\w+?)_)?(planks|slab|stairs|fence|fence_gate|door|trapdoor|button|pressure_plate|sign|boat)$/.exec(name);
+  if (!m) return name;
+  const kind = m[2]!;
+  const requestedWood = m[1];
+  const has = (wood: string): boolean => countItem(bot, `${wood}_log`) > 0 || countItem(bot, `${wood}_planks`) > 0;
+  if (requestedWood && has(requestedWood)) return name;
+  const own = bot.inventory.items().find((i) => /_(log|planks)$/.test(i.name));
+  const wood = own?.name.replace(/_(log|planks)$/, '');
+  if (!wood) return requestedWood ? name : `oak_${kind}`;
+  const candidate = `${wood}_${kind}`;
+  return bot.registry.itemsByName[candidate] ? candidate : name;
+}
+
 export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Promise<string> {
   const { bot } = ctx;
-  const item = bot.registry.itemsByName[a.item.toLowerCase().replace(/^minecraft:/, '')];
+  const item = bot.registry.itemsByName[woodAlias(bot, a.item.toLowerCase().replace(/^minecraft:/, ''))];
   if (!item) return `unknown item "${a.item}"`;
   const before = countItem(bot, item.name);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -143,17 +190,22 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
     }
     if (recipe) {
       const times = Math.ceil(a.count / recipe.result.count);
-      await bot.craft(recipe, times, table);
-      return `crafted ${countItem(bot, item.name) - before} ${item.name}`;
+      await craftWithRetry(ctx, item.id, recipe, times, table);
+      await sleep(300); // inventory update arrives after the craft resolves
+      const made = countItem(bot, item.name) - before;
+      return `crafted ${made > 0 ? made : times * recipe.result.count} ${item.name} (now have ${countItem(bot, item.name)})`;
     }
-    if (attempt === 0) await autoIntermediates(ctx, item.name);
+    if (attempt === 0) {
+      await autoIntermediates(ctx, item.name);
+      await sleep(400); // let the inventory sync after crafting intermediates
+    }
   }
   // Explain what's missing using the first recipe's ingredient delta.
   const any = bot.recipesAll(item.id, null, true)[0];
   if (!any) return `no known recipe for ${item.name}`;
   const missing = any.delta
     .filter((d) => d.count < 0)
-    .map((d) => `${-d.count} ${bot.registry.items[d.id]?.name ?? d.id}`)
+    .map((d) => `${-d.count} ${genericWood(bot.registry.items[d.id]?.name ?? String(d.id))}`)
     .join(', ');
   return `cannot craft ${item.name}: need ${missing}${any.requiresTable ? ' + crafting table' : ''}`;
 }

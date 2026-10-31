@@ -420,7 +420,16 @@ export class BotAgent {
     let result: string;
     this.log('info', `${action.skill} ${JSON.stringify(action.args)} — ${action.thought}`);
     try {
-      result = await runSkill(this.makeCtx(ac.signal), action.skill, action.args);
+      // Hard stop: even if a skill ignores its abort signal, the bot moves on shortly after the timeout.
+      const hardStop = new Promise<never>((_, reject) => {
+        const onAbort = (): void => {
+          setTimeout(() => reject(ac.signal.reason ?? new TimeoutError()), 5_000);
+        };
+        if (ac.signal.aborted) onAbort();
+        else ac.signal.addEventListener('abort', onAbort, { once: true });
+      });
+      hardStop.catch(() => undefined);
+      result = await Promise.race([runSkill(this.makeCtx(ac.signal), action.skill, action.args), hardStop]);
     } catch (e) {
       if (ac.signal.aborted) {
         result = ac.signal.reason instanceof TimeoutError ? `timed out after ${timeoutMs / 1000}s` : `interrupted (${this.interruptedBy ?? 'event'})`;
@@ -429,6 +438,7 @@ export class BotAgent {
       }
       try {
         this.bot?.pathfinder.stop();
+        void this.bot?.collectBlock?.cancelTask().catch(() => undefined);
       } catch {
         /* ignore */
       }
