@@ -191,6 +191,23 @@ export const scenarios = {
     return ok(n >= 2, `till: ${t} | plant: ${p} | wheat planted=${n}`);
   },
 
+  async logs_not_house(ctx, P) {
+    const { X, Y, Z } = P;
+    // a tree (4 logs + leaves) and a "house wall" of logs framed by planks
+    await P.cmd(`fill ${X + 4} ${Y - 1} ${Z - 1} ${X + 4} ${Y - 1} ${Z - 1} minecraft:dirt`);
+    await P.cmd(`fill ${X + 4} ${Y} ${Z - 1} ${X + 4} ${Y + 3} ${Z - 1} minecraft:oak_log`);
+    await P.cmd(`fill ${X + 3} ${Y + 4} ${Z - 2} ${X + 5} ${Y + 5} ${Z} minecraft:oak_leaves[persistent=true]`);
+    await P.cmd(`fill ${X - 5} ${Y} ${Z - 2} ${X - 5} ${Y + 2} ${Z + 2} minecraft:oak_planks`);
+    await P.cmd(`fill ${X - 5} ${Y} ${Z} ${X - 5} ${Y + 2} ${Z} minecraft:oak_log`);
+    await P.give('stone_axe', 1);
+    await P.sleep(800);
+    const r = await gatherSkill(ctx, { block: 'log', count: 3 });
+    let houseLogs = 0;
+    for (let y = P.Y; y <= P.Y + 2; y++) if (await isBlock(P, X - 5, y, Z, 'minecraft:oak_log')) houseLogs++;
+    const got = await count(P, 'oak_log');
+    return ok(got >= 3 && houseLogs === 3, `${r} | logs gathered=${got}, house logs left=${houseLogs}/3`);
+  },
+
   async ore_bonus(ctx, P) {
     await P.cmd(`fill ${P.X + 2} ${P.Y} ${P.Z - 1} ${P.X + 3} ${P.Y + 1} ${P.Z + 1} minecraft:stone`);
     await P.cmd(`setblock ${P.X + 4} ${P.Y} ${P.Z} minecraft:iron_ore`);

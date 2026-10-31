@@ -254,6 +254,9 @@ export function nearManMade(bot: Bot, p: Vec3, r = 2): boolean {
 /** A log that belongs to a tree: leaves within a few blocks above/around, and nothing built next to it. */
 export function isTreeLog(bot: Bot, b: Block): boolean {
   if (nearManMade(bot, b.position, 2)) return false;
+  // Stumps and trunks of partly chopped trees: standing on soil or on another log.
+  const below = bot.blockAt(b.position.offset(0, -1, 0))?.name ?? '';
+  if (/^(dirt|grass_block|podzol|coarse_dirt|rooted_dirt|moss_block|mud|mycelium)$/.test(below) || /_log$/.test(below)) return true;
   for (let dy = 0; dy <= 6; dy++) {
     for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]] as const) {
       const n = bot.blockAt(b.position.offset(dx, dy, dz))?.name ?? '';
