@@ -30,6 +30,9 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Night: monsters spawn in darkness. Zombies and skeletons burn in sunlight; creepers explode; spiders climb.
 - Falling more than ~4 blocks hurts; lava kills; you can drown.`;
 
+const OBEY = `HUMAN PLAYERS (not named Surv_*) are your creators. When your observation shows an ORDER, carry it out
+before your own goals: plan exactly the steps it needs, don't drift back to the checklist until it is done.`;
+
 const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survive by sharing:
 - Add "say" to your reply to talk WITHOUT spending an action: tell nearby bots what you found (with coordinates),
   what you learned (your "Lessons learned"), what you plan, or ask them questions. Answer when someone asks you.
@@ -86,6 +89,8 @@ If someone shouted a village: goto it and build your shelter and beds there. Saf
 
 ${CHEAT_SHEET}
 
+${OBEY}
+
 ${SOCIAL}
 
 GAME-SPECIFIC: a bed is 3 wool + 3 planks (wool from sheep). Shelters need ~70 blocks (planks/cobblestone/dirt)
@@ -99,6 +104,7 @@ ${SMART_FORMAT}`;
   return `You are ${name}, a survivor bot in Minecraft. Pick ONE simple action at a time.
 ${RULES_SHORT}
 ${CHEAT_SHEET}
+${OBEY}
 ${SOCIAL}
 Do the NEXT STEP shown in your observation (it is a ready skill call) unless it just failed - then fix the
 reason given. Follow your tribe's leaders and signs.

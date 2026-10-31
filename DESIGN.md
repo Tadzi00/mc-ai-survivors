@@ -188,6 +188,11 @@ sharing. **Why:** the user wants knowledge to spread through conversation, not t
 Humans (not bots) can `/msg <bot> ...`:
 - `!think`: last thought, current action, remaining plan, goal, rescue target.
 - `!status`: health, food, position, tier, inventory.
+- Orders (`src/bot/orders.ts`): "build shelter/house", "stop/wait", "come here/follow me", "go home", "sleep",
+  "eat" run immediately as skills, no model call (the reply is a short whispered ack). Any other message
+  that reads like an instruction (imperative verb, not a question) becomes a standing ORDER shown first in
+  the observation for 5 min (90 s for direct commands; "stop" clears it) and hides the progress hint.
+  **Why:** the 7B model said "I'll build a shelter now" and then followed its checklist instead.
 - `!home`: your position (if the bot sees you, else its own) becomes its home.
 - `!teach <fact>`: stored directly as a lesson "Taught by <player>: <fact>".
 - `!forget <text>`: removes every note, lesson, discovery, place, heard message, goal and the current plan

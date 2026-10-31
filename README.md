@@ -200,6 +200,8 @@ MIT © 2026 Tadzi00
 | Command | What it does |
 |---|---|
 | `/msg Surv_06 <text>` | Private message: the bot always hears it and reacts right away |
+| `/msg Surv_06 build shelter` | Direct commands run instantly: build shelter/house, stop/wait, come here/follow me, go home, sleep, eat |
+| `/msg Surv_06 gather 20 stone` | Other instructions become an ORDER at the top of its view for 5 min |
 | `/msg Surv_06 !think` | The bot whispers its last thought, current action, plan and goal |
 | `/msg Surv_06 !status` | Health, food, position, inventory |
 | `/msg Surv_06 !forget <text>` | Wipe everything it remembers mentioning `<text>` |

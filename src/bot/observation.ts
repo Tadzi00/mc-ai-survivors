@@ -23,6 +23,8 @@ export interface ObservationInput {
   shoutCooldown?: number;
   /** say range, for the "who can hear you" line. */
   chatRange?: number;
+  /** A player's standing instruction (shown first, overrides the progress hint). */
+  order?: { from: string; text: string };
   /** True while this bot still has an open rescue (help call not reached/answered/dead). */
   helpActive?: boolean;
   /** Seconds since this bot last said/shouted anything. */
@@ -70,6 +72,9 @@ export function buildObservation(o: ObservationInput): string {
   const { bot, memory } = o;
   const me = bot.entity.position;
   const lines: string[] = [];
+  if (o.order) {
+    lines.push(`>>> ORDER from ${o.order.from}: "${o.order.text}". Do this before anything else; plan the steps it needs. <<<`);
+  }
   lines.push(`You: ${o.name} (${o.tier}). Health ${Math.round(bot.health)}/20, Food ${bot.food}/20. Pos ${fmtPos(me)}. Time ${timeLabel(bot)}${bot.isRaining ? ', raining' : ''}.`);
   if (o.seasonsEnabled && o.temp) {
     const t = o.temp;
@@ -86,7 +91,7 @@ export function buildObservation(o: ObservationInput): string {
   // Armor (slots 5-8) and offhand (45) are not part of inventory.items().
   const worn = [5, 6, 7, 8, 45].map((i) => bot.inventory.slots[i]?.name).filter((n): n is string => !!n);
   lines.push(`Wearing: ${worn.length ? worn.join(', ') : 'no armor'}.`);
-  lines.push(progressFor(o));
+  if (!o.order) lines.push(progressFor(o));
 
   const notable: string[] = [];
   const allNames = Object.keys(bot.registry.blocksByName);

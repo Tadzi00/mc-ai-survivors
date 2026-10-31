@@ -22,6 +22,7 @@ import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
 import { enableServerCrafting } from '../skills/impl/resources.js';
 import type { CommandRunner } from '../rcon/rcon.js';
 import { lessonFrom } from './memory.js';
+import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, ProtectedAreas, Roster } from './chat.js';
 import { Memory } from './memory.js';
@@ -117,8 +118,12 @@ export class BotAgent {
   private pendingAliveReply: { to: string; until: number } | undefined;
   /** For !think. */
   private lastThought = '';
+  /** A step to run next regardless of the plan queue (player command). */
+  private forcedStep: PlannedAction | undefined;
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
+  /** A player's instruction that stays at the top of the observation for a while. */
+  private order: { from: string; text: string; until: number } | undefined;
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -508,6 +513,25 @@ export class BotAgent {
       const p = bot.entity.position;
       const sky = bot.blockAt(p.offset(0, 1.6, 0))?.skyLight ?? 15;
       reply(`I'm at ${fmtPos(p)}${sky < 6 ? ' (underground)' : ''}, health ${Math.round(bot.health)}/20, food ${bot.food}/20.`);
+    }
+    if (looksLikeOrder(msg) || parseDirectCommand(msg, from)) {
+      this.order = { from, text: msg.slice(0, 160), until: Date.now() + 5 * 60_000 };
+    }
+    // Common commands run right away, no model needed.
+    const cmd = parseDirectCommand(msg, from);
+    if (cmd) {
+      reply(cmd.ack);
+      // Direct commands: keep the order visible only briefly (in case a step fails); "stop" clears orders.
+      this.order = cmd.steps[0]?.skill === 'wait' ? undefined : { from, text: msg.slice(0, 160), until: Date.now() + 90_000 };
+      this.jsonl.write('order', { from, text: msg, steps: cmd.steps.map((s) => s.skill) });
+      this.planQueue = cmd.steps.slice(1);
+      this.forcedStep = cmd.steps[0];
+      if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
+        this.interruptedBy = `order from ${from}`;
+        this.skillAbort.abort();
+      }
+      this.lastPlanAt = 0;
+      return;
     }
     // React now: stop the current action and re-plan with the message in view.
     this.planQueue = [];
@@ -916,7 +940,10 @@ export class BotAgent {
         continue;
       }
       let action: PlannedAction;
-      if (this.planQueue.length) {
+      if (this.forcedStep) {
+        action = this.forcedStep;
+        this.forcedStep = undefined;
+      } else if (this.planQueue.length) {
         // Next step of the current plan: no model call needed.
         action = this.planQueue.shift()!;
       } else {
@@ -958,6 +985,7 @@ export class BotAgent {
       recentResults: this.recentResults,
       interruptedBy: this.interruptedBy,
       planNote: this.planNote ?? this.repeatedFailureNote(),
+      order: this.order && Date.now() < this.order.until ? this.order : undefined,
       shoutCooldown: shoutCooldownLeft(this.name, this.deps.config.shout.cooldownSeconds),
       chatRange: this.deps.config.chatRange,
       helpActive: !!this.helpCall,
