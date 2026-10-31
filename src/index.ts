@@ -5,7 +5,7 @@ import { LLMRegistry } from './llm/factory.js';
 import { RconClient } from './rcon/rcon.js';
 import { BridgeApi, SeasonsApi } from './rcon/server.js';
 import { log } from './util/log.js';
-import { Roster } from './bot/chat.js';
+import { ProtectedAreas, Roster } from './bot/chat.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -25,8 +25,20 @@ async function main(): Promise<void> {
     log('warn', 'main', `RCON not reachable yet (${String(e)}); will retry on each poll`);
   }
 
+  const protectedAreas = new ProtectedAreas();
+  const refreshAreas = (): void => {
+    void bridge
+      .areas()
+      .then((a) => {
+        if (a) protectedAreas.list = a;
+      })
+      .catch(() => undefined);
+  };
+  refreshAreas();
+  setInterval(refreshAreas, 60_000);
+
   const state = new OrchestratorState(config.paths.state);
-  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster(), rcon });
+  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster(), rcon, protectedAreas });
   manager.start();
   log('info', 'main', `orchestrator running: max ${config.population.maxBots} bots, ${config.population.smartSlots} smart slots`);
 

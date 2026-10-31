@@ -218,3 +218,33 @@ export function fmtPos(p: { x: number; y: number; z: number }): string {
 export function nearestBlock(bot: Bot, names: string[], maxDistance = 32): Block | undefined {
   return findBlocks(bot, names, maxDistance, 1)[0];
 }
+
+/** Blocks that only exist because someone built something. */
+export const MAN_MADE_RE =
+  /_planks$|_slab$|_stairs$|_door$|_trapdoor$|_fence$|_fence_gate$|glass|torch|lantern|_bed$|crafting_table|chest|barrel|furnace|smoker|_wool$|_carpet$|ladder|_sign$|bricks|_wall$|bookshelf|lectern|campfire|stripped_/;
+
+/** True if a man-made block is within `r` blocks of `p` (cheap cube scan). */
+export function nearManMade(bot: Bot, p: Vec3, r = 2): boolean {
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        const b = bot.blockAt(p.offset(dx, dy, dz));
+        if (b && MAN_MADE_RE.test(b.name)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** A log that belongs to a tree: leaves within a few blocks above/around, and nothing built next to it. */
+export function isTreeLog(bot: Bot, b: Block): boolean {
+  if (nearManMade(bot, b.position, 2)) return false;
+  for (let dy = 0; dy <= 6; dy++) {
+    for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]] as const) {
+      const n = bot.blockAt(b.position.offset(dx, dy, dz))?.name ?? '';
+      if (n.endsWith('_leaves') || n === 'nether_wart_block' || n === 'warped_wart_block') return true;
+    }
+  }
+  return false;
+}

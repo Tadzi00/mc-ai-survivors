@@ -1,9 +1,10 @@
 import {
   isUnknownCommand,
-  parseBeds,
+  parseAreas, parseBeds,
   parseCanSpawn,
   parseSeasons,
   type BedPos,
+  type ProtectedArea,
   type BedsResult,
   type CanSpawnResult,
   type SeasonsReading,
@@ -25,6 +26,10 @@ export class BridgeApi {
     const r = parseCanSpawn(out);
     if (!r) log('warn', 'bridge', `unexpected canspawn output: ${out.slice(0, 200)}`);
     return r;
+  }
+
+  async areas(): Promise<ProtectedArea[] | undefined> {
+    return parseAreas(await this.rcon.send('survivors areas raw'));
   }
 
   async beds(): Promise<BedsResult | undefined> {
@@ -80,6 +85,18 @@ export class SeasonsApi {
 
   async temp(x: number, y: number, z: number, world?: string): Promise<SeasonsReading | undefined> {
     return this.query('temp', x, y, z, world);
+  }
+
+  /** Reading at a player's position including body temperature/stage; falls back to coordinates on old plugins. */
+  async tempForPlayer(name: string, x: number, y: number, z: number): Promise<SeasonsReading | undefined> {
+    if (this.disabled || !/^\w{1,16}$/.test(name)) return this.temp(x, y, z);
+    try {
+      const r = parseSeasons(await this.rcon.send(`temp raw player ${name}`), 'temp');
+      if (r) return r;
+    } catch {
+      /* fall through */
+    }
+    return this.temp(x, y, z);
   }
 
   async room(x: number, y: number, z: number, world?: string): Promise<SeasonsReading | undefined> {

@@ -21,6 +21,7 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
     private SimpleEnclosureChecker builtin;
     private GracePeriod grace;
     private final InventoryViewer viewer = new InventoryViewer();
+    private BuildProtection protection;
 
     @Override
     public void onEnable() {
@@ -32,6 +33,11 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
         grace = new GracePeriod(this);
         getServer().getPluginManager().registerEvents(grace, this);
         getServer().getPluginManager().registerEvents(viewer, this);
+        protection = new BuildProtection(getDataFolder(), getLogger());
+        protection.configure(getConfig().getConfigurationSection("protection"));
+        protection.load();
+        getServer().getPluginManager().registerEvents(protection, this);
+        Bukkit.getScheduler().runTaskTimer(this, protection::savePlaced, 20L * 60, 20L * 60);
         PluginCommand cmd = getCommand("survivors");
         if (cmd != null) {
             SurvivorsCommand handler = new SurvivorsCommand(this);
@@ -45,7 +51,12 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (protection != null) protection.savePlaced();
         if (index != null) index.save();
+    }
+
+    public BuildProtection protection() {
+        return protection;
     }
 
     public InventoryViewer viewer() {

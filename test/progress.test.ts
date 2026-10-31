@@ -50,3 +50,13 @@ describe('hunger override', () => {
     expect(progressText({ ...f, hunger: 16 })).toContain('NEXT STEP (wood');
   });
 });
+
+describe('bed claiming', () => {
+  it('suggests claiming a nearby bed before crafting one', () => {
+    const f: ProgressFacts = {
+      items: { stone_pickaxe: 1, stone_sword: 1, torch: 4 }, foodCount: 6, tableNearby: true,
+      homeKnown: true, bedKnown: false, spareBedKnown: false, bedNear: { x: 1, y: 64, z: 2 },
+    };
+    expect(progressText(f)).toContain('there is a bed at 1,64,2');
+  });
+});

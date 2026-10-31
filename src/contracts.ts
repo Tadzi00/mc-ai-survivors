@@ -70,6 +70,9 @@ export const SeasonsReadingSchema = z.object({
   outsideC: z.number(),
   season: z.string(),
   comfortable: z.boolean(),
+  /** Only in `temp raw player <name>` (additive v1 fields): the player's core temperature and stage. */
+  bodyC: z.number().optional(),
+  stage: z.string().optional(),
 });
 export type SeasonsReading = z.infer<typeof SeasonsReadingSchema>;
 
@@ -85,6 +88,19 @@ export function parseBeds(output: string): BedsResult | undefined {
   if (!raw || raw.version !== 'v1') return undefined;
   const r = BedsSchema.safeParse(raw.data);
   return r.success ? r.data : undefined;
+}
+
+const AreasSchema = z.object({
+  areas: z.array(z.object({ world: z.string(), x: z.number(), y: z.number(), z: z.number(), radius: z.number() })),
+});
+export type ProtectedArea = z.infer<typeof AreasSchema>['areas'][number];
+
+/** SB|v1|areas|{"areas":[{world,x,y,z,radius}]} - places bots must not break blocks in. */
+export function parseAreas(output: string): ProtectedArea[] | undefined {
+  const raw = parseRawLine(output, 'SB', 'areas');
+  if (!raw || raw.version !== 'v1') return undefined;
+  const r = AreasSchema.safeParse(raw.data);
+  return r.success ? r.data.areas : undefined;
 }
 
 export function parseSeasons(output: string, kind: 'temp' | 'room'): SeasonsReading | undefined {

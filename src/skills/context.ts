@@ -14,6 +14,8 @@ export interface SkillContext {
   /** Aborted when a reflex interrupts, the skill times out, or the bot dies. */
   signal: AbortSignal;
   log: (msg: string) => void;
+  /** Protected building areas (don't break blocks there). */
+  protectedAreas?: { contains(p: { x: number; y: number; z: number }): boolean };
 }
 
 export type SkillFn<A> = (ctx: SkillContext, args: A) => Promise<string>;

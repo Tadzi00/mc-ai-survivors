@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
+import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { placeTorchSkill } from '../skills/impl/building.js';
@@ -23,7 +23,7 @@ import { enableServerCrafting } from '../skills/impl/resources.js';
 import type { CommandRunner } from '../rcon/rcon.js';
 import { lessonFrom } from './memory.js';
 import { classifyChat } from './chat.js';
-import { ChatLog, Roster } from './chat.js';
+import { ChatLog, ProtectedAreas, Roster } from './chat.js';
 import { Memory } from './memory.js';
 import { buildObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
@@ -39,6 +39,8 @@ export interface AgentDeps {
   roster: Roster;
   /** Server console (RCON), used for server-side crafting. */
   rcon?: CommandRunner;
+  /** Protected building areas from the bridge plugin. */
+  protectedAreas?: ProtectedAreas;
 }
 
 export interface AgentEvents {
@@ -70,8 +72,12 @@ const DISCOVERY_BLOCKS: Array<[string, (n: string) => boolean]> = [
 ];
 const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit']);
 
+const FACE_OFFSETS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
+
 /** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
+
+const BODY_COLD = new Set(['COLD', 'SHIVERING', 'HYPOTHERMIA']);
 
 const PREY = ['cow', 'pig', 'sheep', 'chicken', 'rabbit'];
 const PREY_LABELS = new Set(PREY.map((p) => `${p}s`));
@@ -176,10 +182,17 @@ export class BotAgent {
       // Use doors instead of digging through walls (Paper handles door opening fine).
       moves.canOpenDoors = true;
       // Never dig through our own (or a known) shelter: breaking blocks near home costs a fortune.
-      moves.exclusionAreasBreak.push((block: { position: { x: number; y: number; z: number } }) => {
+      moves.exclusionAreasBreak.push((block: { name: string; position: Vec3 }) => {
+        const p = block.position;
+        // never dig through buildings: protected areas, man-made blocks, or blocks touching them
+        if (this.deps.protectedAreas?.contains(p)) return 1000;
+        if (MAN_MADE_RE.test(block.name)) return 1000;
+        for (const [dx, dy, dz] of FACE_OFFSETS) {
+          const n = bot.blockAt(p.offset(dx, dy, dz));
+          if (n && MAN_MADE_RE.test(n.name)) return 1000;
+        }
         const home = this.memory.place('home');
         if (!home) return 0;
-        const p = block.position;
         return Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4 ? 1000 : 0;
       });
       bot.pathfinder.setMovements(moves);
@@ -221,7 +234,7 @@ export class BotAgent {
     });
     bot.on('health', () => {
       if (bot.health < this.lastHealth - 0.5) {
-        this.wakePlanner('hurt');
+        this.wakePlanner(this.temp?.stage === 'HYPOTHERMIA' ? 'freezing damage' : 'hurt');
         this.maybeCallForHelp();
       }
       this.lastHealth = bot.health;
@@ -292,6 +305,7 @@ export class BotAgent {
       config: this.deps.config,
       signal,
       log: (m) => this.log('debug', m),
+      protectedAreas: this.deps.protectedAreas,
     };
   }
 
@@ -300,7 +314,7 @@ export class BotAgent {
     const bot = this.bot;
     if (!this.running || !bot?.entity || !this.deps.seasons.enabled) return;
     const p = bot.entity.position;
-    this.temp = await this.deps.seasons.temp(p.x, p.y, p.z).catch(() => undefined);
+    this.temp = await this.deps.seasons.tempForPlayer(this.name, p.x, p.y, p.z).catch(() => undefined);
   }
 
   // ---------------------------------------------------------------- reflexes
@@ -456,13 +470,30 @@ export class BotAgent {
       reply(`Inventory: ${inventorySummary(bot).slice(0, 220)}`);
       return;
     }
+    if (/^!home\b/i.test(msg)) {
+      // Your position if the bot can see you, else its own.
+      const pos = bot.players[from]?.entity?.position ?? bot.entity.position;
+      this.memory.setPlace('home', { x: pos.x, y: pos.y, z: pos.z, note: `set by ${from}` });
+      delete this.memory.data.places.doorway;
+      this.memory.learn(`${from} gave me a home at ${fmtPos(pos)}`);
+      reply(`OK, my home is now ${fmtPos(pos)}.`);
+      return;
+    }
+    const teach = /^!teach\s+(.+)$/i.exec(msg);
+    if (teach) {
+      const fact = teach[1]!.trim().slice(0, 150);
+      this.memory.learn(`Taught by ${from}: ${fact}`);
+      this.jsonl.write('taught', { from, fact });
+      reply(`Got it, I'll remember: ${fact}`);
+      return;
+    }
     const f = /^!forget\s+(.+)$/i.exec(msg);
     if (f) {
       reply(this.forgetAbout(f[1]!.trim(), true));
       return;
     }
     if (/^!/.test(msg)) {
-      reply('Commands: !think, !status, !forget <text>. Anything else is a message to me.');
+      reply('Commands: !think, !status, !home (here becomes my home), !teach <fact>, !forget <text>. Anything else is a message to me.');
       return;
     }
     this.chat.offerDirect(from, msg);
@@ -476,7 +507,7 @@ export class BotAgent {
     // React now: stop the current action and re-plan with the message in view.
     this.planQueue = [];
     this.replyTo = from;
-    this.planNote = `${from} sent you a PRIVATE message: "${msg.slice(0, 160)}". Answer THAT message directly in "say" (it is sent privately to ${from}); if it is an instruction, follow it`;
+    this.planNote = `${from} sent you a PRIVATE message: "${msg.slice(0, 160)}". Answer THAT message directly in "say" (it is sent privately to ${from}); if it is an instruction, follow it; if it teaches you something, also write it in "learned"`;
     if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
       this.interruptedBy = `message from ${from}`;
       this.skillAbort.abort();
@@ -598,6 +629,7 @@ export class BotAgent {
       const nearHome = !!home && Math.hypot(front.x - home.x, front.z - home.z) < 6;
       for (const b of [bot.blockAt(front.offset(0, 1, 0)), bot.blockAt(front)]) {
         if (!b || b.boundingBox !== 'block' || nearHome || NEVER_DIG.test(b.name) || !bot.canDigBlock(b)) continue;
+        if (this.deps.protectedAreas?.contains(b.position) || nearManMade(bot, b.position, 1)) continue;
         this.jsonl.write('stuck', { pos: { x: front.x, y: front.y, z: front.z }, action: `dig ${b.name}` });
         await bot.dig(b, true).catch(() => undefined);
         return;
@@ -719,7 +751,11 @@ export class BotAgent {
       isNight: bot.time.timeOfDay >= 12_600 && bot.time.timeOfDay <= 23_000,
       isSleeping: bot.isSleeping,
       bedKnown: !!this.memory.place('bed'),
-      cold: t && this.deps.seasons.enabled ? !t.comfortable && t.tempC < cfg.coldThresholdC : undefined,
+      // Cold = the air is freezing OR our body is already getting cold (shivering/hypothermia).
+      cold:
+        t && this.deps.seasons.enabled
+          ? (!t.comfortable && t.tempC < cfg.coldThresholdC) || BODY_COLD.has(t.stage ?? '')
+          : undefined,
       hasTorch: countItem(bot, 'torch') > 0,
       homeKnown: !!this.memory.place('home'),
     };

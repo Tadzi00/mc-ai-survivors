@@ -188,6 +188,8 @@ sharing. **Why:** the user wants knowledge to spread through conversation, not t
 Humans (not bots) can `/msg <bot> ...`:
 - `!think`: last thought, current action, remaining plan, goal, rescue target.
 - `!status`: health, food, position, tier, inventory.
+- `!home`: your position (if the bot sees you, else its own) becomes its home.
+- `!teach <fact>`: stored directly as a lesson "Taught by <player>: <fact>".
 - `!forget <text>`: removes every note, lesson, discovery, place, heard message, goal and the current plan
   mentioning `<text>` (e.g. a dead bot's name).
 - anything else: a private message the bot always hears (any distance), shown as `<Player -> YOU>`; the
@@ -234,6 +236,27 @@ were missing (e.g. hunting cows in a cave). Conclusions can be wrong; that is pa
 `state/bots/<name>.json`: goal, notes, known places (home, bed, chest, furnace, crafting_table).
 Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merged into one
 "Older notes:" line), no LLM summarization, so memory can't be corrupted by a bad model call.
+
+### 6.5.1 Buildings are off limits
+
+- Server side (bridge plugin, authoritative): every placed block remembers its placer
+  (`placed-blocks.yml`). A bot may break blocks it placed itself, never blocks placed by a human or another
+  bot. `/survivors protect <radius>` creates a protected sphere around the player (for buildings made before
+  tracking); bots can't break anything inside (`protected-areas.yml`, `/survivors areas [raw]`,
+  `/survivors unprotect`). Bots = names matching `protection.bot-name-pattern`.
+- Bot side (so they don't waste time): `gather log` only takes logs that look like trees (leaves within a
+  few blocks, nothing man-made within 2); other gathers skip blocks touching man-made blocks; nothing inside
+  protected areas (refreshed from `SB|v1|areas` every 60 s). The pathfinder gives digging man-made blocks,
+  blocks touching them, or blocks in protected areas a huge cost; the unstuck routine never digs them.
+- `/msg <bot> !home` sets the bot's home to the player's position (so a house you built becomes its home);
+  a bot without a bed is pointed at the nearest bed it sees ("claim it" via `sleep`).
+
+### 6.5.2 Feeling cold
+
+Bots read `temp raw player <name>` every 30 s, so the observation shows their BODY temperature and stage
+("SHIVERING, you are getting dangerously cold..."). The cold reflex fires when the air is below
+`bot.coldThresholdC` and uncomfortable OR the body stage is COLD/SHIVERING/HYPOTHERMIA. Damage while
+hypothermic wakes the planner with reason "freezing damage".
 
 ### 6.6 Food
 

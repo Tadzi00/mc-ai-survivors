@@ -203,5 +203,9 @@ MIT © 2026 Tadzi00
 | `/msg Surv_06 !think` | The bot whispers its last thought, current action, plan and goal |
 | `/msg Surv_06 !status` | Health, food, position, inventory |
 | `/msg Surv_06 !forget <text>` | Wipe everything it remembers mentioning `<text>` |
+| `/msg Surv_06 !home` | Where you stand becomes its home (e.g. a house you built) |
+| `/msg Surv_06 !teach <fact>` | It remembers the fact as a lesson |
+| `/survivors protect <radius>` | Bots can't break blocks within radius of you (op) |
+| `/survivors unprotect` / `/survivors areas` | Remove / list protected areas (op) |
 | `/survivors inv Surv_06` | Read-only view of its inventory (op) |
 | `/survivors grace start\|stop\|status` | First-day "no hostile mobs" period (op) |

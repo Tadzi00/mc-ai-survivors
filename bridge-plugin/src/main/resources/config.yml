@@ -16,3 +16,8 @@ grace:
   # "/survivors grace start" with no tick count uses this (24000 = one Minecraft day).
   # The orchestrator starts it when it seeds the first bots (population.graceOnSeed).
   default-ticks: 24000
+protection:
+  # Bots can't break blocks placed by humans or other bots, nor anything inside /survivors protect areas.
+  enabled: true
+  # Which players are bots (matched against the player name).
+  bot-name-pattern: '^Surv_\d+$'

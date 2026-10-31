@@ -147,3 +147,12 @@ export class Roster {
     return p && now - p.t <= maxAgeMs ? { x: p.x, y: p.y, z: p.z } : undefined;
   }
 }
+
+/** Protected building areas from the bridge plugin, refreshed by the orchestrator. Shared by all agents. */
+export class ProtectedAreas {
+  list: Array<{ x: number; y: number; z: number; radius: number }> = [];
+
+  contains(p: Pos): boolean {
+    return this.list.some((a) => (p.x - a.x) ** 2 + (p.y - a.y) ** 2 + (p.z - a.z) ** 2 <= a.radius * a.radius);
+  }
+}

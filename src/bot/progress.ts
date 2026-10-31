@@ -11,6 +11,8 @@ export interface ProgressFacts {
   homeKnown: boolean;
   bedKnown: boolean;
   spareBedKnown: boolean;
+  /** A bed block seen within 24 blocks (may be free to claim). */
+  bedNear?: { x: number; y: number; z: number };
   /** Current food bar 0-20 (optional). */
   hunger?: number;
   /** true when the bot is in a sealed, comfortable room (from RealisticSeasons), undefined if unknown */
@@ -46,6 +48,9 @@ export function milestones(f: ProgressFacts): Milestone[] {
   const coal = (it.coal ?? 0) + (it.charcoal ?? 0);
 
   const bedHint = (which: string): string => {
+    if (which === 'own' && f.bedNear) {
+      return `there is a bed at ${f.bedNear.x},${f.bedNear.y},${f.bedNear.z}: claim it (right-click by day, sleep by night) {"skill":"sleep","args":{}}`;
+    }
     if (bedsInInv > 0) return `go inside your shelter and place it: {"skill":"place_bed","args":{}}`;
     if (wool < 3) return `need ${3 - wool} more wool for a ${which} bed: kill sheep {"skill":"attack","args":{"target":"sheep"}}`;
     return `craft the ${which} bed: {"skill":"craft","args":{"item":"white_bed","count":1}}`;

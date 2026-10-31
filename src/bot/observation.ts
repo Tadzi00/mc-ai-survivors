@@ -76,6 +76,7 @@ export function buildObservation(o: ObservationInput): string {
     lines.push(
       `Season ${t.season}. Here ${t.tempC.toFixed(1)}C, outside ${t.outsideC.toFixed(1)}C, ${t.comfortable ? 'comfortable' : 'UNCOMFORTABLE'}${t.inside ? `, indoors (${t.sealed ? 'sealed' : 'leaky'})` : ', outdoors'}.`,
     );
+    if (t.bodyC !== undefined) lines.push(bodyLine(t.bodyC, t.stage ?? 'COMFORTABLE'));
   } else if (!o.seasonsEnabled) {
     lines.push('Seasons: not available on this server.');
   }
@@ -175,6 +176,11 @@ function progressFor(o: ObservationInput): string {
     homeKnown: !!memory.place('home'),
     bedKnown: !!memory.place('bed'),
     spareBedKnown: !!memory.place('spare_bed'),
+    bedNear: (() => {
+      const beds = Object.keys(bot.registry.blocksByName).filter((n) => n.endsWith('_bed'));
+      const b = findBlocks(bot, beds, 24, 1)[0];
+      return b ? { x: b.position.x, y: b.position.y, z: b.position.z } : undefined;
+    })(),
     hunger: bot.food,
     warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
   });
@@ -188,4 +194,23 @@ function surroundings(bot: Bot): string {
   if (sky >= 13) return `OUTDOORS under open sky (y=${y})`;
   if (sky >= 6) return `under cover (trees/roof/overhang), sky partly visible (y=${y})`;
   return `UNDERGROUND / in a cave or closed room, no daylight (y=${y}). Animals and trees live on the surface`;
+}
+
+/** How the bot's body feels (from RealisticSeasons). Loud when it matters. */
+function bodyLine(bodyC: number, stage: string): string {
+  const b = `Your body: ${bodyC.toFixed(1)}C`;
+  switch (stage) {
+    case 'HYPOTHERMIA':
+      return `${b} - HYPOTHERMIA, you are FREEZING TO DEATH. Get into a sealed room with a torch/fire NOW.`;
+    case 'SHIVERING':
+      return `${b} - SHIVERING, you are getting dangerously cold. Go somewhere warm soon (sealed room + torch, fire, leather armor).`;
+    case 'COLD':
+      return `${b} - you feel cold.`;
+    case 'HOT':
+      return `${b} - you feel hot.`;
+    case 'HEAT_STROKE':
+      return `${b} - HEAT STROKE, get to shade/cool place NOW.`;
+    default:
+      return `${b} - you feel fine.`;
+  }
 }

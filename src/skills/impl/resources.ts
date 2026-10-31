@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, freeSpotNearBot, gotoNear, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, freeSpotNearBot, gotoNear, isTreeLog, nearManMade, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -53,8 +53,11 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
       const feetY = bot.entity.position.y;
       // Skip blocks we recently failed to reach, and prefer ones near our own height
       // (tree trunks over canopy logs, which pathfinding often can't reach).
+      const isLog = names.every((n) => /_log$|_stem$/.test(n));
       const targets = findBlocks(bot, names, 64, 32)
         .filter((b) => b.position.y > -60 && !skip.has(posKey(b)))
+        // never take blocks from buildings: logs must be trees; nothing inside protected areas
+        .filter((b) => !ctx.protectedAreas?.contains(b.position) && (isLog ? isTreeLog(bot, b) : !nearManMade(bot, b.position, 1)))
         .sort((p, q) => targetCost(bot, p, feetY) - targetCost(bot, q, feetY));
       if (targets.length === 0) break;
       const target = targets[0]!;

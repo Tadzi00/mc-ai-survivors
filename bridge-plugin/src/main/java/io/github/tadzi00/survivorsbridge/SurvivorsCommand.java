@@ -46,6 +46,9 @@ public final class SurvivorsCommand implements TabExecutor {
                 case "check" -> check(sender, args);
                 case "grace" -> grace(sender, args);
                 case "inv" -> inv(sender, args);
+                case "protect" -> protect(sender, args);
+                case "unprotect" -> unprotect(sender);
+                case "areas" -> areas(sender, args);
                 default -> help(sender);
             }
         } catch (IllegalArgumentException e) {
@@ -62,6 +65,9 @@ public final class SurvivorsCommand implements TabExecutor {
         s.sendMessage("/survivors scan <radius> [x y z [world]]");
         s.sendMessage("/survivors grace <start [ticks] [world]|stop [world]|status [world]>");
         s.sendMessage("/survivors inv <player>  (read-only view of a bot's inventory)");
+        s.sendMessage("/survivors protect <radius>  (bots can't break blocks within radius of you)");
+        s.sendMessage("/survivors unprotect  (remove the protected area you stand in)");
+        s.sendMessage("/survivors areas [raw]");
         s.sendMessage("/survivors check <x> <y> <z> [world]");
     }
 
@@ -189,6 +195,37 @@ public final class SurvivorsCommand implements TabExecutor {
         }
     }
 
+    private void protect(CommandSender s, String[] a) {
+        if (!(s instanceof Player p)) throw new IllegalArgumentException("stand where you want the protected area and run it as a player");
+        int r = a.length > 1 ? Math.max(1, Math.min(64, parseInt(a[1]))) : 8;
+        BuildProtection.Area area = plugin.protection().protect(p.getLocation(), r);
+        s.sendMessage("Protected " + area.name() + ": radius " + r + " around " + area.x() + " " + area.y() + " " + area.z()
+                + ". Bots can't break blocks there.");
+    }
+
+    private void unprotect(CommandSender s) {
+        if (!(s instanceof Player p)) throw new IllegalArgumentException("players only");
+        BuildProtection.Area a = plugin.protection().unprotect(p.getLocation());
+        s.sendMessage(a == null ? "You are not inside a protected area." : "Removed " + a.name() + ".");
+    }
+
+    private void areas(CommandSender s, String[] a) {
+        List<BuildProtection.Area> list = plugin.protection().areas();
+        if (a.length > 1 && a[1].equalsIgnoreCase("raw")) {
+            StringBuilder sb = new StringBuilder(PREFIX + "areas|{\"areas\":[");
+            for (int i = 0; i < list.size(); i++) {
+                BuildProtection.Area x = list.get(i);
+                if (i > 0) sb.append(',');
+                sb.append("{\"world\":\"").append(x.world()).append("\",\"x\":").append(x.x()).append(",\"y\":").append(x.y())
+                        .append(",\"z\":").append(x.z()).append(",\"radius\":").append(x.radius()).append('}');
+            }
+            s.sendMessage(sb.append("]}").toString());
+            return;
+        }
+        if (list.isEmpty()) s.sendMessage("No protected areas.");
+        for (BuildProtection.Area x : list) s.sendMessage(x.name() + ": " + x.x() + " " + x.y() + " " + x.z() + " r=" + x.radius());
+    }
+
     private void inv(CommandSender s, String[] a) {
         if (!(s instanceof Player viewer)) throw new IllegalArgumentException("only players can open inventories");
         if (a.length < 2) throw new IllegalArgumentException("usage: /survivors inv <player>");
@@ -219,7 +256,7 @@ public final class SurvivorsCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
         if (a.length == 1) {
             List<String> out = new ArrayList<>();
-            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check", "grace", "inv")) {
+            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check", "grace", "inv", "protect", "unprotect", "areas")) {
                 if (o.startsWith(a[0].toLowerCase())) out.add(o);
             }
             return out;
