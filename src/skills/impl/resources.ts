@@ -45,8 +45,29 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   const onAbort = (): void => void bot.collectBlock.cancelTask().catch(() => undefined);
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   const skip = unreachableFor(bot);
+  let travelled = '';
+  const wantLogs = names.every((n) => /_log$|_stem$/.test(n));
+  /** Nearest remembered place (20-150 blocks away) where this resource was seen. */
+  const rememberedSpot = (): { what: string; x: number; y: number; z: number } | undefined => {
+    const label = wantLogs ? 'trees' : names.find((n) => !n.startsWith('deepslate_')) ?? a.block;
+    const me = bot.entity.position;
+    return (ctx.memory.data.discoveries ?? [])
+      .filter((d) => d.what === label || d.what === a.block)
+      .map((d) => ({ d, dist: Math.hypot(d.x - me.x, d.z - me.z) }))
+      .filter((x) => x.dist > 20 && x.dist <= 150)
+      .sort((p, q) => p.dist - q.dist)[0]?.d;
+  };
   try {
-    while (counter() - start < a.count && failures < 4) {
+    while (counter() - start < a.count && (failures < 4 || !travelled)) {
+      if (failures >= 4 && !travelled) {
+        // Everything nearby was unreachable (e.g. trees down a cliff): try the remembered spot instead.
+        const spot = rememberedSpot();
+        if (!spot) break;
+        travelled = `walked to ${spot.what} seen at ${spot.x},${spot.y},${spot.z}`;
+        await gotoNear(ctx, spot.x, spot.y, spot.z, 4, 60_000).catch(() => undefined);
+        failures = 0;
+        continue;
+      }
       throwIfAborted(ctx.signal);
       const now = Date.now();
       for (const [k, until] of skip) if (until < now) skip.delete(k);
@@ -60,7 +81,15 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
         // ...and never from a home (its own floor/walls are plain dirt/cobblestone and were being mined)
         .filter((b) => !isHomeBlock(ctx, b.position) && (isLog ? isTreeLog(bot, b) : !nearManMade(bot, b.position, 1)))
         .sort((p, q) => targetCost(bot, p, feetY) - targetCost(bot, q, feetY));
-      if (targets.length === 0) break;
+      if (targets.length === 0) {
+        // Nothing here: walk once to the nearest place where this resource was seen before.
+        if (travelled) break;
+        const spot = rememberedSpot();
+        if (!spot) break;
+        travelled = `walked to ${spot.what} seen at ${spot.x},${spot.y},${spot.z}`;
+        await gotoNear(ctx, spot.x, spot.y, spot.z, 4, 60_000).catch(() => undefined);
+        continue;
+      }
       const target = targets[0]!;
       await transitHomeDoor(ctx, target.position); // leave the house through the door, not the floor
       // Blocks with harvestTools (stone, ores) drop nothing without a suitable tool.
@@ -88,8 +117,9 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   const got = counter() - start;
   const extra = Object.entries(bonus).map(([k, v]) => `${v} ${k}`).join(', ');
   const also = extra ? `; also mined ${extra} found on the way` : '';
-  if (got === 0) return `found no reachable ${a.block} nearby (try explore)${also}`;
-  return `gathered ${got} ${a.block} (wanted ${a.count})${also}`;
+  const via = travelled ? ` (${travelled})` : '';
+  if (got === 0) return `found no reachable ${a.block} nearby${travelled ? ` even after I ${travelled}` : ' and none remembered'} (explore 40+ blocks to find more)${also}`;
+  return `gathered ${got} ${a.block} (wanted ${a.count})${via}${also}`;
 }
 
 /**

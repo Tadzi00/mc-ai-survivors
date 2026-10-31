@@ -208,6 +208,25 @@ export const scenarios = {
     return ok(got >= 3 && houseLogs === 3, `${r} | logs gathered=${got}, house logs left=${houseLogs}/3`);
   },
 
+  async gather_remembered(ctx, P) {
+    const { X, Y, Z } = P;
+    const TX = X + 80;
+    await P.cmd(`forceload add ${X} ${Z - 8} ${X + 96} ${Z + 8}`);
+    await P.cmd(`fill ${X} ${Y - 2} ${Z - 2} ${X + 88} ${Y - 1} ${Z + 2} minecraft:stone`);
+    await P.cmd(`fill ${X} ${Y + 7} ${Z - 2} ${X + 88} ${Y + 7} ${Z + 2} minecraft:light[level=15]`);
+    await P.cmd(`setblock ${TX} ${Y - 1} ${Z} minecraft:dirt`);
+    await P.cmd(`fill ${TX} ${Y} ${Z} ${TX} ${Y + 3} ${Z} minecraft:oak_log`);
+    await P.cmd(`fill ${TX - 1} ${Y + 4} ${Z - 1} ${TX + 1} ${Y + 5} ${Z + 1} minecraft:oak_leaves[persistent=true]`);
+    ctx.memory.discover('trees', { x: TX, y: Y, z: Z });
+    await P.give('stone_axe', 1);
+    await P.sleep(1000);
+    const r = await gatherSkill(ctx, { block: 'log', count: 2 });
+    const got = await count(P, 'oak_log');
+    await P.cmd(`fill ${X} ${Y - 2} ${Z - 2} ${X + 88} ${Y + 7} ${Z + 2} minecraft:air`);
+    await P.cmd(`forceload remove ${X} ${Z - 8} ${X + 96} ${Z + 8}`);
+    return ok(got >= 2 && /walked to trees/.test(r), `${r} | oak_log=${got}`);
+  },
+
   async ore_bonus(ctx, P) {
     await P.cmd(`fill ${P.X + 2} ${P.Y} ${P.Z - 1} ${P.X + 3} ${P.Y + 1} ${P.Z + 1} minecraft:stone`);
     await P.cmd(`setblock ${P.X + 4} ${P.Y} ${P.Z} minecraft:iron_ore`);

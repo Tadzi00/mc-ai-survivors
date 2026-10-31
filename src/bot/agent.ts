@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
+import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
@@ -379,6 +379,9 @@ export class BotAgent {
       const b = findBlocks(bot, all.filter(pred), 32, 1)[0];
       if (b && this.memory.discover(what, b.position)) this.jsonl.write('discovery', { what, pos: b.position });
     }
+    // Trees (natural logs only, not house walls), so gather can walk back to wood later.
+    const tree = findBlocks(bot, all.filter((n) => /_log$/.test(n) && !n.startsWith('stripped')), 32, 24).find((b) => isTreeLog(bot, b));
+    if (tree && this.memory.discover('trees', tree.position)) this.jsonl.write('discovery', { what: 'trees', pos: tree.position });
     for (const e of Object.values(bot.entities)) {
       if (!e.name || !ANIMALS.has(e.name) || !e.position || e.position.distanceTo(bot.entity.position) > 32) continue;
       if (this.memory.discover(`${e.name}s`, e.position)) this.jsonl.write('discovery', { what: e.name, pos: e.position });
