@@ -168,12 +168,30 @@ action**. The observation lists teammates within say range and nudges ("you have
 "tell them what you found or learned"). The prompt tells bots they start knowing almost nothing and survive by
 sharing. **Why:** the user wants knowledge to spread through conversation, not through code.
 
-### 6.1.3 Help shouts (scripted)
+### 6.1.3 Help shouts, rescue and check-ins (scripted)
 
-When a bot loses health and a hostile is within 6 blocks, it automatically shouts
-`HELP! <mob> attacking me at x y z` (uses the normal shout cooldown, so at most once a minute). Listeners
-get a `!! X NEEDS HELP at ... (distance, direction)` line with a ready `goto` call for 90 s; going to help
-is the model's choice.
+- A bot that loses health with a hostile within 6 blocks shouts `HELP! <mob> attacking me at x y z`
+  (normal shout cooldown).
+- Hearing it, a bot with health >= 12 within 150 blocks runs there via the **`assist` reflex** (no model call;
+  a model round trip used to take 1-2 min). Own danger (fight/flee) still comes first. On arrival it says
+  "I'm here to help!" and the fight reflex takes over.
+- 30 s after the call the helper shouts `<caller>, are you alive? Where are you?`. The caller answers
+  automatically as soon as its own shout cooldown allows: `<helper>: alive at x y z, health N, still need
+  help | safe now`. Alive + need help → the helper updates the target position; "safe" → rescue ends; no
+  answer within 35 s → rescue ends and a lesson "X did not answer (maybe dead)" is recorded.
+- A death message for the caller ends the rescue immediately (auto-forget of that bot's calls/shouted spots).
+- The question needs "alive?"/"where are you"/"are you ok" and is ignored inside replies, so two bots
+  can't reply to each other in a loop.
+
+### 6.1.4 Player commands via /msg
+
+Humans (not bots) can `/msg <bot> ...`:
+- `!think`: last thought, current action, remaining plan, goal, rescue target.
+- `!status`: health, food, position, tier, inventory.
+- `!forget <text>`: removes every note, lesson, discovery, place, heard message, goal and the current plan
+  mentioning `<text>` (e.g. a dead bot's name).
+- anything else: a private message the bot always hears (any distance), shown as `<Player -> YOU>`; the
+  current action is interrupted and the bot re-plans right away.
 
 ### 6.2 Signs and books
 
@@ -313,5 +331,11 @@ are not logged (size); the hash lets you spot repeated identical situations.
 - `build_shelter` digs out leaves/panes/fences/snow/ice in its outline and replaces them with real blocks.
   The door is crafted before building and placed on the floor block's top face. If that fails the doorway
   is walled up (room stays sealed) and remembered as place `doorway`; `add_door` fixes it later.
+- While fighting/fleeing (reflex busy, pvp target, attack skill) the unstuck routine is off: standing still
+  next to a mob is not "stuck" (it used to stop the pathfinder and end fights).
+- Bots put on better armor automatically (protection tier leather < gold < chain < iron/turtle < diamond <
+  netherite) every 10 s and right after picking something up. Leather is warmest but lowest tier: tier wins.
+- `gather` also mines more valuable ores it passes within 8 blocks (diamond > iron > gold > coal > copper >
+  redstone/lapis, only if its tool can harvest them, max 8 per call) and reports "also mined ...".
 - Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
   `exclusionAreasBreak`), so they don't tunnel out of their own shelter.

@@ -23,7 +23,7 @@ import { lessonFrom } from './memory.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, Roster } from './chat.js';
 import { Memory } from './memory.js';
-import { buildObservation } from './observation.js';
+import { buildObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
 
@@ -45,6 +45,11 @@ export interface AgentEvents {
 
 /** Entity metadata index 0 is a bit field; bit 0x01 = on fire. */
 const isOnFire = (flags: unknown): boolean => typeof flags === 'number' && (flags & 0x01) === 1;
+
+const ARMOR_TIERS: Record<string, number> = { leather: 1, golden: 2, chainmail: 3, turtle: 4, iron: 4, diamond: 5, netherite: 6 };
+function armorRank(name: string): number {
+  return ARMOR_TIERS[name.split('_')[0]!] ?? 0;
+}
 
 /** What the discovery scan looks for (label, block-name predicate). */
 const DISCOVERY_BLOCKS: Array<[string, (n: string) => boolean]> = [
@@ -90,6 +95,14 @@ export class BotAgent {
   private planQueue: PlannedAction[] = [];
   private planNote: string | undefined;
   private lastSpokeAt = Date.now();
+  /** A teammate's HELP shout we may run to (assist reflex). */
+  private helpCall:
+    | { from: string; pos: { x: number; y: number; z: number }; at: number; checkedAt?: number }
+    | undefined;
+  /** Someone asked if we're alive: reply (as a shout) as soon as our shout cooldown allows. */
+  private pendingAliveReply: { to: string; until: number } | undefined;
+  /** For !think. */
+  private lastThought = '';
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -100,7 +113,7 @@ export class BotAgent {
   private reflexBusy = false;
   private interruptedBy: string | undefined;
   private lastPlanAt = 0;
-  private readonly recentResults: string[] = [];
+  private recentResults: string[] = [];
   private readonly reflexLastRun = new Map<Reflex, number>();
   private temp: SeasonsReading | undefined;
   private timers: NodeJS.Timeout[] = [];
@@ -167,6 +180,12 @@ export class BotAgent {
       this.timers.push(setInterval(() => void this.reflexTick(), this.deps.config.bot.reflexIntervalMs));
       this.timers.push(setInterval(() => this.idleWatchdog(), 10_000));
       this.timers.push(setInterval(() => this.scanDiscoveries(), 15_000));
+      this.timers.push(setInterval(() => this.helpCheckTick(), 3_000));
+      this.timers.push(setInterval(() => void this.equipBestArmor(), 10_000));
+      bot.on('playerCollect', (collector) => {
+        if (collector === bot.entity) setTimeout(() => void this.equipBestArmor(), 500);
+      });
+      bot.on('whisper', (username, message) => void this.onWhisper(username, String(message)));
       this.timers.push(setInterval(() => void this.unstickTick(), 1_000));
       this.timers.push(setInterval(() => void this.temperatureTick(), this.deps.config.bot.temperatureCheckSeconds * 1000));
       void this.temperatureTick();
@@ -295,6 +314,7 @@ export class BotAgent {
   private noteDeathOfOther(msg: string): void {
     const m = /^(\w{3,16}) (was |died|drowned|fell|burned|froze|hit the ground|tried to swim|walked into|starved|suffocated|blew up|withered)/.exec(msg);
     if (!m || m[1] === this.name) return;
+    this.forgetAbout(m[1]!, false);
     const where = this.deps.roster.get(m[1]!, 120_000);
     const text = `${msg}${where ? ` near ${Math.floor(where.x)},${Math.floor(where.y)},${Math.floor(where.z)}` : ''}`;
     this.memory.learn(`DEATH: ${text}`);
@@ -308,12 +328,186 @@ export class BotAgent {
     const c = /(-?\d{1,6})[ ,]+(-?\d{1,4})[ ,]+(-?\d{1,6})/.exec(text);
     const pos = c ? { x: Number(c[1]), y: Number(c[2]), z: Number(c[3]) } : speakerPos;
     if (!pos) return;
+    // Someone asks whether WE are alive -> answer (scripted, so it happens even mid-task).
+    if (new RegExp(`\\b${this.name}\\b`, 'i').test(text) && /alive\?|where are you|are you ok/i.test(text) && !/^\S+: alive at/i.test(text)) {
+      this.pendingAliveReply = { to: from, until: Date.now() + 70_000 };
+      return;
+    }
+    // The bot we're helping answered our check-in.
+    if (this.helpCall && from === this.helpCall.from && /alive/i.test(text)) {
+      if (/safe|fine|no help/i.test(text)) {
+        this.helpCall = undefined;
+        this.log('info', `${from} says they are safe; stopping help`);
+      } else {
+        this.helpCall = { from, pos, at: Date.now() };
+        this.log('info', `${from} is alive at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}; still going`);
+      }
+      return;
+    }
+    if (/help/i.test(text) && from !== this.name) {
+      this.helpCall = { from, pos, at: Date.now() };
+      this.log('info', `heard ${from} call for help at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`);
+    }
     if (/village|town|base|meet/i.test(text) && !this.memory.place('village')) {
       this.memory.setPlace('village', { ...pos, note: `shouted by ${from}` });
       this.memory.learn(`${from} shouted the village location: ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`);
     } else if (!/help|attack/i.test(text)) {
       this.memory.discover(`spot shouted by ${from}: ${text.slice(0, 40)}`, pos);
     }
+  }
+
+  /**
+   * Every 3 s: (1) helper side: 30 s after a help call, shout a check-in "X, are you alive?"; if no answer
+   * within 35 s more, give up (they may be dead). (2) caller side: answer a check-in as soon as the shout
+   * cooldown allows, with position, health and whether help is still needed.
+   */
+  private helpCheckTick(): void {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity) return;
+    const now = Date.now();
+    const call = this.helpCall;
+    if (call) {
+      if (!call.checkedAt && now - call.at > 30_000) {
+        if (!tryShout(bot, this.name, `${call.from}, are you alive? Where are you?`, this.deps.config.shout)) {
+          call.checkedAt = now;
+          this.jsonl.write('help_checkin', { to: call.from });
+        }
+      } else if (call.checkedAt && now - call.checkedAt > 35_000 && call.at < call.checkedAt) {
+        this.helpCall = undefined;
+        this.memory.learn(`${call.from} called for help but did not answer my check-in (maybe dead)`);
+        this.log('info', `${call.from} did not answer; giving up the rescue`);
+      }
+    }
+    const ask = this.pendingAliveReply;
+    if (ask) {
+      if (now > ask.until) {
+        this.pendingAliveReply = undefined;
+        return;
+      }
+      const p = bot.entity.position;
+      const danger = this.hostilesWithin(12).length > 0;
+      const text = `${ask.to}: alive at ${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}, health ${Math.round(bot.health)}, ${danger ? 'still need help' : 'safe now'}`;
+      if (!tryShout(bot, this.name, text, this.deps.config.shout)) this.pendingAliveReply = undefined;
+    }
+  }
+
+  /** Puts on any armor piece in the inventory that is better than what is worn (protection tier). */
+  private async equipBestArmor(): Promise<void> {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity) return;
+    const SLOTS: Array<[RegExp, number, 'head' | 'torso' | 'legs' | 'feet']> = [
+      [/_helmet$/, 5, 'head'],
+      [/_chestplate$/, 6, 'torso'],
+      [/_leggings$/, 7, 'legs'],
+      [/_boots$/, 8, 'feet'],
+    ];
+    for (const [re, slot, dest] of SLOTS) {
+      const worn = bot.inventory.slots[slot];
+      const best = bot.inventory
+        .items()
+        .filter((i) => re.test(i.name))
+        .sort((a, b) => armorRank(b.name) - armorRank(a.name))[0];
+      if (best && armorRank(best.name) > (worn ? armorRank(worn.name) : 0)) {
+        try {
+          await bot.equip(best, dest);
+          this.jsonl.write('armor', { equipped: best.name, replaced: worn?.name ?? null });
+          this.log('info', `put on ${best.name}${worn ? ` (was ${worn.name})` : ''}`);
+        } catch {
+          /* try again next round */
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- /msg commands from players
+
+  /**
+   * Private messages (/msg <bot> ...) from humans: "!think", "!status", "!forget <text>"; anything else is a
+   * direct message the bot always hears and reacts to right away. Other bots' whispers are ignored.
+   */
+  private async onWhisper(from: string, message: string): Promise<void> {
+    const bot = this.bot;
+    if (!bot || from === this.name || from.startsWith(this.deps.config.population.namePrefix)) return;
+    const msg = message.trim();
+    const reply = (t: string): void => {
+      for (const part of t.match(/.{1,230}(\s|$)/g) ?? [t]) bot.whisper(from, part.trim());
+    };
+    if (/^!think\b/i.test(msg)) {
+      const plan = this.planQueue.map((p) => `${p.skill} ${JSON.stringify(p.args)}`).join(' -> ');
+      reply(`Thought: ${this.lastThought || '(none yet)'}`);
+      reply(`Doing: ${this.currentSkill ?? (this.reflexBusy ? 'a reflex' : this.planningSince ? 'thinking...' : 'nothing')}${plan ? ` | then: ${plan}` : ''}`);
+      reply(`Goal: ${this.memory.data.goal ?? '(none)'}${this.helpCall ? ` | helping ${this.helpCall.from}` : ''}`);
+      return;
+    }
+    if (/^!status\b/i.test(msg)) {
+      const p = bot.entity.position;
+      reply(`HP ${Math.round(bot.health)}/20, food ${bot.food}/20, at ${fmtPos(p)}, ${this.tier}`);
+      reply(`Inventory: ${inventorySummary(bot).slice(0, 220)}`);
+      return;
+    }
+    const f = /^!forget\s+(.+)$/i.exec(msg);
+    if (f) {
+      reply(this.forgetAbout(f[1]!.trim(), true));
+      return;
+    }
+    if (/^!/.test(msg)) {
+      reply('Commands: !think, !status, !forget <text>. Anything else is a message to me.');
+      return;
+    }
+    this.chat.offerDirect(from, msg);
+    this.jsonl.write('heard', { from, text: msg, direct: true });
+    // React now: stop the current action and re-plan with the message in view.
+    this.planQueue = [];
+    this.planNote = `${from} sent you a private message - answer with "say" or follow it`;
+    if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
+      this.interruptedBy = `message from ${from}`;
+      this.skillAbort.abort();
+    }
+    this.lastPlanAt = 0;
+  }
+
+  /**
+   * Removes everything mentioning `needle` from memory: notes, lessons, discoveries, places, heard chat,
+   * plan, help call, goal. `manual` = player command (wipes all mentions); otherwise only stale calls for
+   * help / shouted spots from a bot that just died are dropped (its death lesson is kept).
+   */
+  private forgetAbout(needle: string, manual: boolean): string {
+    const n = needle.toLowerCase();
+    const has = (t: string | undefined | null): boolean => !!t && t.toLowerCase().includes(n);
+    let count = 0;
+    const d = this.memory.data;
+    if (this.helpCall && has(this.helpCall.from)) {
+      this.helpCall = undefined;
+      count++;
+    }
+    count += this.chat.forget((h) => has(h.from) || (manual && has(h.text)));
+    const before = (d.discoveries ?? []).length;
+    d.discoveries = (d.discoveries ?? []).filter((x) => !has(x.what));
+    count += before - d.discoveries.length;
+    if (manual) {
+      const nb = d.notes.length;
+      d.notes = d.notes.filter((x) => !has(x));
+      const lb = (d.lessons ?? []).length;
+      d.lessons = (d.lessons ?? []).filter((x) => !has(x));
+      count += nb - d.notes.length + lb - d.lessons.length;
+      for (const [k, p] of Object.entries(d.places)) {
+        if (has(k) || has(p.note)) {
+          delete d.places[k];
+          count++;
+        }
+      }
+      if (has(d.goal)) {
+        d.goal = null;
+        count++;
+      }
+      if (this.planQueue.length || this.planNote) count++;
+      this.planQueue = [];
+      this.planNote = undefined;
+      this.recentResults = this.recentResults.filter((r) => !has(r));
+    }
+    this.memory.save();
+    if (manual) this.jsonl.write('forget', { needle, removed: count });
+    return `Forgot ${count} thing(s) about "${needle}".`;
   }
 
   /** Attacked by a hostile: shout for help with coordinates (scripted; uses the normal shout cooldown). */
@@ -340,7 +534,9 @@ export class BotAgent {
     if (!this.running || !bot?.entity) return;
     this.deps.roster.update(this.name, bot.entity.position);
     if (this.unsticking) return;
-    if (!bot.pathfinder.isMoving() || bot.isSleeping) {
+    // Fighting/fleeing stands still on purpose (pvp keeps the pathfinder "moving"): never "unstick" then,
+    // that used to stop the pathfinder and end the fight.
+    if (!bot.pathfinder.isMoving() || bot.isSleeping || this.reflexBusy || bot.pvp.target || this.currentSkill === 'attack') {
       this.moveTrack = [];
       this.stuckTries = 0;
       return;
@@ -477,6 +673,10 @@ export class BotAgent {
       inWater: feet?.name === 'water' || head?.name === 'water',
       hostile: hostile ? { distance: hostile.position.distanceTo(bot.entity.position), type: hostile.name ?? 'mob' } : undefined,
       nearbyHostiles: this.hostilesWithin(10).length,
+      helpCall:
+        this.helpCall && Date.now() - this.helpCall.at < 90_000
+          ? { distance: bot.entity.position.distanceTo(bot.entity.position.clone().set(this.helpCall.pos.x, this.helpCall.pos.y, this.helpCall.pos.z)) }
+          : undefined,
       hasWeapon: bot.inventory.items().some((i) => /_sword$|_axe$/.test(i.name)),
       isNight: bot.time.timeOfDay >= 12_600 && bot.time.timeOfDay <= 23_000,
       isSleeping: bot.isSleeping,
@@ -504,7 +704,7 @@ export class BotAgent {
       this.skillAbort.abort();
     }
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : 25_000);
+    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : choice === 'assist' ? 50_000 : 25_000);
     const started = Date.now();
     let result = '';
     try {
@@ -574,6 +774,23 @@ export class BotAgent {
         }
         if (!hostile) return 'nothing to flee';
         return this.runAway(ctx, signal, 15_000);
+      }
+      case 'assist': {
+        const call = this.helpCall;
+        if (!call) return 'no help call';
+        this.jsonl.write('assist', { to: call.from, pos: call.pos });
+        bot.setControlState('sprint', true);
+        try {
+          await gotoNear(ctx, call.pos.x, call.pos.y, call.pos.z, 3, 45_000).catch(() => undefined);
+        } finally {
+          bot.setControlState('sprint', false);
+        }
+        const d = bot.entity.position.distanceTo(bot.entity.position.clone().set(call.pos.x, call.pos.y, call.pos.z));
+        if (d <= 6 || Date.now() - call.at > 90_000) {
+          this.helpCall = undefined;
+          if (d <= 6) bot.chat(`${call.from}, I'm here to help!`);
+        }
+        return d <= 6 ? `reached ${call.from}` : `running to ${call.from}, ${Math.round(d)}m left`;
       }
       case 'eat':
         return eatSkill(ctx);
@@ -666,6 +883,7 @@ export class BotAgent {
         error: parsed.ok ? undefined : parsed.error,
       });
       if (parsed.ok) {
+        this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
         if (parsed.say && this.bot) {
           this.bot.chat(parsed.say);
           this.lastSpokeAt = Date.now();

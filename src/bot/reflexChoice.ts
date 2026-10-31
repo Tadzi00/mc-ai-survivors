@@ -8,6 +8,8 @@ export interface ReflexState {
   onFire: boolean;
   inWater: boolean;
   hostile?: { distance: number; type: string };
+  /** A teammate's HELP shout heard recently (distance to the given coordinates). */
+  helpCall?: { distance: number };
   /** Hostile mobs within 10 blocks (defaults to 1 when a hostile is known). */
   nearbyHostiles?: number;
   hasWeapon: boolean;
@@ -26,6 +28,7 @@ export type Reflex =
   | 'surface'
   | 'fight'
   | 'flee'
+  | 'assist'
   | 'eat'
   | 'warm_torch'
   | 'warm_home'
@@ -43,6 +46,8 @@ export function chooseReflex(s: ReflexState): Reflex | null {
     const fight = s.hasWeapon ? s.health >= 10 && !(many && s.health < 16) : s.health >= 18 && !many;
     return fight ? 'fight' : 'flee';
   }
+  // Run to a teammate who shouted HELP (no model call: speed matters). Only when healthy enough.
+  if (s.helpCall && s.helpCall.distance > 4 && s.helpCall.distance <= 150 && s.health >= 12) return 'assist';
   if (s.hasFood && (s.food <= 14 || (s.health < 12 && s.food < 20))) return 'eat';
   if (s.cold === true) {
     if (s.homeKnown) return 'warm_home';

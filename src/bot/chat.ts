@@ -53,6 +53,8 @@ export interface HeardMessage {
   distance?: number;
   /** Speaker position when known (shouts show it so bots can meet up). */
   pos?: Pos;
+  /** A private /msg to this bot (always heard, any distance). */
+  direct?: boolean;
 }
 
 export interface Ranges {
@@ -91,6 +93,22 @@ export class ChatLog {
     return true;
   }
 
+  /** A direct /msg: heard regardless of distance. */
+  offerDirect(from: string, text: string, now = Date.now()): void {
+    this.items.push({ from, text: text.slice(0, 240), at: now, kind: 'say', direct: true });
+    while (this.items.length > this.capacity) this.items.shift();
+    this.unread++;
+  }
+
+  /** Drops messages matching `pred` (forget command, dead speakers). Returns how many were removed. */
+  forget(pred: (h: HeardMessage) => boolean): number {
+    const before = this.items.length;
+    const keep = this.items.filter((h) => !pred(h));
+    this.items.length = 0;
+    this.items.push(...keep);
+    return before - keep.length;
+  }
+
   recent(): readonly HeardMessage[] {
     return this.items;
   }
@@ -105,6 +123,7 @@ export class ChatLog {
 
 /** One line per heard message for the observation. */
 export function formatHeard(h: HeardMessage, me: Pos | undefined): string {
+  if (h.direct) return `<${h.from} -> YOU (private message)> ${h.text}`;
   const where =
     h.pos && me ? ` @${h.pos.x},${h.pos.y},${h.pos.z} (${Math.round(h.distance ?? distance(me, h.pos))}m ${compass(me, h.pos)})` : h.distance !== undefined ? ` ${Math.round(h.distance)}m` : ' (far away)';
   return `<${h.from}${h.kind === 'shout' ? ' SHOUTS' : ''}${where}> ${h.text}`;

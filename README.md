@@ -194,3 +194,14 @@ See `CLAUDE.md` for commands and `DESIGN.md` for the design rationale and the "N
 ## License
 
 MIT © 2026 Tadzi00
+
+## Talking to the bots in game
+
+| Command | What it does |
+|---|---|
+| `/msg Surv_06 <text>` | Private message: the bot always hears it and reacts right away |
+| `/msg Surv_06 !think` | The bot whispers its last thought, current action, plan and goal |
+| `/msg Surv_06 !status` | Health, food, position, inventory |
+| `/msg Surv_06 !forget <text>` | Wipe everything it remembers mentioning `<text>` |
+| `/survivors inv Surv_06` | Read-only view of its inventory (op) |
+| `/survivors grace start\|stop\|status` | First-day "no hostile mobs" period (op) |

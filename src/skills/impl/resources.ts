@@ -40,6 +40,7 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   const counter = (): number => bot.inventory.items().filter((i) => dropRes.some((r) => r.test(i.name))).reduce((n, i) => n + i.count, 0);
   const start = counter();
   let failures = 0;
+  const bonus: Record<string, number> = {};
   const onAbort = (): void => void bot.collectBlock.cancelTask().catch(() => undefined);
   ctx.signal.addEventListener('abort', onAbort, { once: true });
   const skip = unreachableFor(bot);
@@ -64,6 +65,7 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
       try {
         await withTimeout(bot.collectBlock.collect(target, { ignoreNoPath: true }), 20_000, 'collect');
         if (counter() === before) skip.set(posKey(target), Date.now() + SKIP_MS);
+        await grabValuableOres(ctx, names, skip, bonus);
       } catch (e) {
         if (ctx.signal.aborted) throw new AbortError();
         failures++;
@@ -78,8 +80,45 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
     ctx.signal.removeEventListener('abort', onAbort);
   }
   const got = counter() - start;
-  if (got === 0) return `found no reachable ${a.block} nearby (try explore)`;
-  return `gathered ${got} ${a.block} (wanted ${a.count})`;
+  const extra = Object.entries(bonus).map(([k, v]) => `${v} ${k}`).join(', ');
+  const also = extra ? `; also mined ${extra} found on the way` : '';
+  if (got === 0) return `found no reachable ${a.block} nearby (try explore)${also}`;
+  return `gathered ${got} ${a.block} (wanted ${a.count})${also}`;
+}
+
+/**
+ * Valuable ores a bot always takes when it passes them, whatever it is gathering (most valuable first).
+ * E.g. hunting copper and seeing iron within 8 blocks -> mine the iron too, then continue.
+ */
+const VALUABLE_ORES = [
+  'diamond_ore', 'deepslate_diamond_ore', 'iron_ore', 'deepslate_iron_ore', 'gold_ore', 'deepslate_gold_ore',
+  'coal_ore', 'deepslate_coal_ore', 'copper_ore', 'deepslate_copper_ore', 'redstone_ore', 'lapis_ore',
+];
+const MAX_BONUS_PER_GATHER = 8;
+
+async function grabValuableOres(ctx: SkillContext, gathering: string[], skip: Map<string, number>, bonus: Record<string, number>): Promise<void> {
+  const { bot } = ctx;
+  const wanted = VALUABLE_ORES.filter((o) => !gathering.includes(o) && bot.registry.blocksByName[o]);
+  for (let i = 0; i < 3; i++) {
+    if (Object.values(bonus).reduce((n, v) => n + v, 0) >= MAX_BONUS_PER_GATHER) return;
+    throwIfAborted(ctx.signal);
+    const ore = findBlocks(bot, wanted, 8, 8)
+      .filter((b) => !skip.has(posKey(b)))
+      // only ores our tools can actually harvest, most valuable first
+      .filter((b) => !b.harvestTools || Object.keys(b.harvestTools).some((id) => bot.inventory.items().some((it) => String(it.type) === id)))
+      .sort((p, q) => VALUABLE_ORES.indexOf(p.name) - VALUABLE_ORES.indexOf(q.name))[0];
+    if (!ore) return;
+    try {
+      await withTimeout(bot.collectBlock.collect(ore, { ignoreNoPath: true }), 15_000, 'collect');
+      const k = ore.name.replace(/^deepslate_/, '');
+      bonus[k] = (bonus[k] ?? 0) + 1;
+      ctx.memory.discover(k, ore.position);
+    } catch {
+      if (ctx.signal.aborted) throw new AbortError();
+      skip.set(posKey(ore), Date.now() + SKIP_MS);
+      void bot.collectBlock.cancelTask().catch(() => undefined);
+    }
+  }
 }
 
 /** Why the last ensureCraftingTable call failed (shown to the model), per bot. */
