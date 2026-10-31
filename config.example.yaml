@@ -1,0 +1,92 @@
+# mc-ai-survivors configuration. Copy to config.yaml and edit.
+# Any string value may use ${ENV_VAR} or ${ENV_VAR:-default} (docker-compose passes env through).
+
+server:
+  host: ${MC_HOST:-localhost}
+  port: ${MC_PORT:-25565}
+  # Minecraft version the bots speak, or "auto" to detect from the server.
+  version: ${MC_VERSION:-1.21.4}
+
+rcon:
+  host: ${RCON_HOST:-localhost}
+  port: ${RCON_PORT:-25575}
+  password: ${RCON_PASSWORD:-change-me}
+  timeoutMs: 5000
+
+population:
+  maxBots: 8              # hard cap on living bots
+  smartSlots: 2           # how many living bots may use the smart tier at once
+  initialBots: 2          # spawned at first start (they take the smart slots)
+  reseedWhenExtinct: true # if every bot is dead, spawn initialBots again
+  spawnPollSeconds: 30    # how often to ask the bridge plugin "/survivors canspawn"
+  namePrefix: Surv_       # bots are Surv_01, Surv_02, ... names are never reused
+  spawnAtBed: true        # teleport newborns to their bed + set spawnpoint (via RCON)
+  autoWhitelist: true     # "whitelist add <bot>" via RCON before each bot joins (offline mode safety)
+
+# Bots only hear chat from players within this many blocks (intentional, see DESIGN.md).
+chatRange: 32
+
+bot:
+  plannerMinIntervalSeconds: 6   # min time between LLM decisions per bot
+  reflexIntervalMs: 500
+  skillTimeoutSeconds: 120
+  scanRadius: 24                 # radius for "nearby blocks/entities" in observations
+  coldThresholdC: 5              # below this (and not comfortable) the "cold" reflex fires
+  temperatureCheckSeconds: 30    # RCON /temp raw poll per bot (only if RealisticSeasons is installed)
+  notesMax: 40
+  chatHistory: 8
+  reconnectDelaySeconds: 10
+
+# LLM providers. Define as many as you like; tiers below pick one by name.
+providers:
+  local:
+    type: ollama
+    # Local container (docker compose --profile ollama) or any remote Ollama server:
+    baseUrl: ${OLLAMA_BASE_URL:-http://localhost:11434}
+    concurrency: 1        # one GPU -> one request at a time (RTX 2060 6GB)
+    timeoutMs: 90000
+    retries: 2
+    keepAlive: 30m
+
+  # Any OpenAI-compatible endpoint (OpenAI, OpenRouter, LM Studio, vLLM, llama.cpp server):
+  openrouter:
+    type: openai-compatible
+    baseUrl: https://openrouter.ai/api/v1
+    apiKeyEnv: OPENROUTER_API_KEY
+    jsonMode: true
+    concurrency: 4
+    timeoutMs: 60000
+
+  # Anthropic Messages API (key from ANTHROPIC_API_KEY):
+  claude:
+    type: anthropic
+    apiKeyEnv: ANTHROPIC_API_KEY
+    effort: low           # one small JSON action per call; keep it fast/cheap
+    concurrency: 4
+    timeoutMs: 60000
+
+tiers:
+  # Defaults for a 6 GB GPU: 7B for the 2 smart bots, 3B for the rest. Both fit if loaded one at a time;
+  # with concurrency 1 Ollama swaps models as needed (set OLLAMA_MAX_LOADED_MODELS=2 if VRAM allows).
+  smart:
+    provider: local
+    model: qwen2.5:7b
+    maxTokens: 300
+    temperature: 0.4
+  basic:
+    provider: local
+    model: qwen2.5:3b
+    maxTokens: 200
+    temperature: 0.3
+
+  # Paid alternative (Anthropic):
+  # smart: { provider: claude, model: claude-sonnet-5-5, maxTokens: 400 }
+  # basic: { provider: claude, model: claude-haiku-5-5, maxTokens: 300 }
+  #
+  # OpenRouter alternative:
+  # smart: { provider: openrouter, model: qwen/qwen-2.5-72b-instruct, maxTokens: 300 }
+  # basic: { provider: openrouter, model: meta-llama/llama-3.1-8b-instruct, maxTokens: 200 }
+
+paths:
+  state: ./state
+  logs: ./logs

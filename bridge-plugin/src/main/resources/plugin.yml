@@ -1,0 +1,16 @@
+name: SurvivorsBridge
+version: '${version}'
+main: io.github.tadzi00.survivorsbridge.SurvivorsBridgePlugin
+api-version: '1.21'
+description: Bed index, bed ownership and population-growth rule for mc-ai-survivors bots.
+author: Tadzi00
+softdepend: [RealisticSeasons]
+commands:
+  survivors:
+    description: SurvivorsBridge admin and orchestrator commands
+    usage: /survivors <beds|canspawn|assign|unassign|scan|check>
+    permission: survivorsbridge.admin
+permissions:
+  survivorsbridge.admin:
+    description: Use /survivors
+    default: op

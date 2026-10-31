@@ -1,0 +1,85 @@
+# mc-ai-survivors stack.
+#   docker compose up -d                      # Minecraft (Paper) + bots, LLM via remote/paid provider
+#   docker compose --profile ollama up -d     # ...plus a local Ollama container on the NVIDIA GPU
+#
+# SECURITY: the server runs in OFFLINE mode (bots have no Mojang accounts). Anyone who can reach
+# port 25565 can join under ANY name, including an op's. Keep the whitelist on (default below; the
+# orchestrator whitelists each bot via RCON) and/or firewall the port. Never expose RCON publicly.
+services:
+  minecraft:
+    image: itzg/minecraft-server:latest
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: ${MC_VERSION:-1.21.4}
+      ONLINE_MODE: "FALSE"
+      # Offline clients cannot sign chat; without this bots' chat is rejected.
+      ENFORCE_SECURE_PROFILE: "FALSE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: ${RCON_PASSWORD:?set RCON_PASSWORD in .env}
+      RCON_PORT: 25575
+      MEMORY: ${MC_MEMORY:-4G}
+      DIFFICULTY: ${MC_DIFFICULTY:-normal}
+      ENABLE_WHITELIST: ${MC_ENABLE_WHITELIST:-true}
+      ENFORCE_WHITELIST: ${MC_ENABLE_WHITELIST:-true}
+      # Your own player name(s), comma separated, so humans can still join and watch.
+      WHITELIST: ${MC_WHITELIST:-}
+      OPS: ${MC_OPS:-}
+      MOTD: "mc-ai-survivors"
+      VIEW_DISTANCE: 8
+    ports:
+      - "${MC_BIND:-0.0.0.0}:25565:25565"
+      # RCON only on localhost (for running the orchestrator outside docker during development).
+      - "127.0.0.1:25575:25575"
+    volumes:
+      - ./data:/data
+      # SurvivorsBridge jar (+ optional RealisticSeasons jar) go here; itzg syncs /plugins -> /data/plugins.
+      - ./plugins:/plugins:ro
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  bots:
+    build: .
+    depends_on:
+      minecraft:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MC_HOST: minecraft
+      MC_PORT: 25565
+      MC_VERSION: ${MC_VERSION:-1.21.4}
+      RCON_HOST: minecraft
+      RCON_PORT: 25575
+      RCON_PASSWORD: ${RCON_PASSWORD}
+      # Default: the ollama service above. Point to a remote server, e.g. http://192.168.1.50:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      CONFIG_FILE: /app/config.yaml
+    volumes:
+      # cp config.example.yaml config.yaml first (otherwise Docker creates a directory here).
+      - ./config.yaml:/app/config.yaml:ro
+      - ./state:/app/state
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  ollama:

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+logs/
+state/
+data/
+.env
+config.yaml
+*.log
+coverage/
+plugins/*.jar
+bridge-plugin/build/
+bridge-plugin/.gradle/
+.gradle/
+.idea/
+.vscode/

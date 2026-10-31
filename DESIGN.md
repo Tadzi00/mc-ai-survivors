@@ -1,0 +1,213 @@
+# DESIGN — mc-ai-survivors
+
+This document is for future maintainers, human or AI. It records **what is intentional**, so that
+deliberate game-design choices are not "fixed" as bugs. If you change one of these decisions, update
+this file in the same change.
+
+## 1. Goal and shape
+
+A small tribe of LLM-driven Minecraft bots tries to survive a seasonal world. The interesting dynamic
+is **population pressure**: the tribe grows only by building proper shelter (sealed, warm rooms with
+beds), and shrinks through permanent death. Two components:
+
+| Component | Where | Role |
+|---|---|---|
+| Orchestrator | `src/` (TypeScript, Node 24) | lifecycle, LLM calls, bot brains, skills |
+| SurvivorsBridge | `bridge-plugin/` (Java, Paper) | server-authoritative bed index, ownership, room validity, spawn rule |
+| RealisticSeasons | separate repo, optional | seasons, temperature, room sealing/heat (consumed via contract) |
+
+## 2. Two-layer brain (reflexes + planner)
+
+Each `BotAgent` (`src/bot/agent.ts`) has two layers:
+
+1. **Reflexes** (no LLM, every `reflexIntervalMs`, default 500 ms). Pure arbitration in
+   `src/bot/reflexChoice.ts` picks at most one of: escape lava, extinguish, surface (drowning),
+   fight/flee hostile, eat, warm up (go home / place torch), sleep at night. A reflex **aborts the
+   current skill** via its `AbortSignal`; the planner is told "interrupted by reflex X" next time.
+2. **Planner** (LLM). When idle (no skill, no reflex) and at least `plannerMinIntervalSeconds` since
+   the last decision, it builds a compact text observation and asks the tier's model for ONE action.
+
+**Why:** LLM latency on cheap/local models is seconds to tens of seconds; survival emergencies need
+sub-second reactions. Splitting lets a 3B model on a 6 GB GPU drive a bot without dying to every zombie,
+and keeps LLM traffic low (one call per finished skill, not per tick).
+
+## 3. One action per call, JSON only
+
+The model returns exactly one object: `{"thought": "...", "skill": "...", "args": {...}}`.
+
+- Parsed with `extractJsonObject` (tolerates code fences, prose, trailing commas), then validated with
+  the skill's zod schema (`src/skills/schemas.ts`) and the tier's allowed skill list.
+- Invalid → **one** retry with the validation error appended; still invalid → deterministic fallback
+  (`gather log` if poor in wood, else `explore`). Provider/network error → fallback + 5 s pause.
+- No multi-step plans, no tool-calling loops, no chat history between decisions. Continuity comes from
+  the observation: goal, notes, known places, last 5 skill results, heard chat.
+
+**Why:** small models are far more reliable at "pick one of these verbs" than at long plans or native
+tool calling, and every provider (Ollama, OpenAI-compatible, Anthropic) supports plain JSON text.
+
+## 4. Deterministic skills
+
+Skills (`src/skills/impl/*`) are ordinary async functions: deterministic, bounded by
+`skillTimeoutSeconds`, abortable via `ctx.signal`, and they return a **short result string** that the
+model sees next turn ("gathered 4 log (wanted 8)", "not enough blocks: need 71, have 30 ...").
+They do the fiddly parts so the LLM "doesn't think too much": `craft` auto-places a crafting table and
+auto-makes planks/sticks, `build_shelter` is a fixed template with a resource check first, `smelt`
+maps products to inputs, `gather` understands aliases like `log`.
+
+Tier subsets: basic bots cannot use `set_goal`, `write_book`, `write_sign`, `smelt`, `place_block`
+(shorter prompt, fewer ways to go wrong). Smart bots get everything and a longer prompt with strategy.
+
+## 5. Population lifecycle
+
+### 5.1 Spawn rule (exact semantics — implemented in the bridge plugin, `SpawnRule.java`)
+
+```
+canSpawn = for every living bot B: B owns a bed AND that bed's room is valid
+           AND there exists ≥ 1 valid bed with no owner
+```
+
+- "Living bots" is the list the orchestrator passes (`state/orchestrator.json` bots with status alive).
+- Valid room: RealisticSeasons present → `isInsideSealedRoom && isComfortable` at the block above the
+  bed head; absent → built-in enclosure flood fill (≤ 512 air blocks, no sky access).
+- Bot name matching is case-insensitive. One bed per bot, one owner per bed.
+- The free bed is the first unowned valid bed by (world, x, y, z).
+
+The orchestrator (`src/lifecycle/policy.ts#decideSpawn`, unit-tested) adds:
+`aliveCount == 0` → seed `initialBots` (first run, or after extinction if `reseedWhenExtinct`);
+`aliveCount >= maxBots` → no; bridge unavailable → no; else follow the bridge.
+
+On a spawn: name `Surv_NN` (never reused), `/survivors assign <name> <bed>`, `whitelist add`, connect,
+then `spawnpoint` + `tp` to the bed via RCON.
+
+### 5.2 Permanent death
+
+On mineflayer `death`: the bot is disconnected (`quit`), marked dead with the server's death message
+as cause, its bed unassigned (the bed becomes a free bed again), and the name is never used again.
+There is **no respawn**. Non-death disconnects (kick, network) reconnect after `reconnectDelaySeconds`.
+
+### 5.3 Smart-slot inheritance
+
+At most `smartSlots` living bots are smart. `assignTier` gives a newborn the smart tier iff fewer than
+`smartSlots` living bots are smart. So when a smart bot dies, its slot is freed and the **next
+newborn** is smart. Existing basic bots are **not** promoted mid-life (their prompts/memories were
+built for the basic tier, and promotion would make deaths of smart bots "free").
+
+### 5.4 Server-authoritative bed counting
+
+Bed state lives in the server plugin, not in the orchestrator, because only the server sees every
+bed placed/broken/exploded/burned by anyone (bots, humans, creepers) and can run the room check with
+real world data. The orchestrator never counts beds itself.
+
+## 6. Communication
+
+### 6.1 Proximity chat (intentional)
+
+Minecraft chat is global, but a bot only **hears** a message if the speaker's entity position is known
+and within `chatRange` (default 32) blocks (`src/bot/chat.ts`). Unknown position (out of render
+distance) = not heard. Humans still see all chat in their client; the limit models bots' perception.
+**Why:** it makes physical proximity matter and forces durable channels for long-range knowledge.
+
+### 6.2 Signs and books
+
+Signs (`write_sign`, `read_signs`) and written books (`write_book`, `read_book`, chests, lecterns) are
+the lasting, location-bound information channels — how a smart bot teaches a basic bot or a bot
+not yet born. Sign text is read from block-entity data (`getSignText()`, front + back, 1.20+). Book pages
+come from 1.20.5+ item components (`written_book_content`/`writable_book_content`) with legacy NBT fallback.
+
+### 6.3 Memory
+
+`state/bots/<name>.json`: goal, notes, known places (home, bed, chest, furnace, crafting_table).
+Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merged into one
+"Older notes:" line), no LLM summarization, so memory can't be corrupted by a bad model call.
+
+## 7. Server access: RCON
+
+Bots are **not** op. Everything privileged goes through one serialized RCON connection
+(`src/rcon/rcon.ts`): `survivors ...` (bridge), `temp raw` / `room raw` (RealisticSeasons, queried
+**for the bot's position** by the orchestrator), `whitelist add`, `spawnpoint`, `tp`. Names are
+validated (`[A-Za-z0-9_]{1,16}`) before being interpolated into commands.
+
+## 8. Offline mode
+
+Bots have no Mojang accounts, so the server runs `ONLINE_MODE=FALSE` and
+`ENFORCE_SECURE_PROFILE=FALSE` (offline clients can't sign chat). This is insecure by nature:
+whitelist on (auto-whitelisting of bots), firewall the port, RCON only on localhost.
+
+## 9. Contracts (STABLE)
+
+Both are single lines, `|`-separated, ending in a JSON object. Parsers: `src/contracts.ts`.
+They may be surrounded by other output and colour codes; parsers scan for the first matching line.
+
+### SB|v1 (SurvivorsBridge, this repo)
+
+```
+SB|v1|beds|{"beds":[{"x":int,"y":int,"z":int,"world":str,"owner":str|null,"valid":bool,"reason":str}]}
+SB|v1|canspawn|{"canSpawn":bool,"freeValidBed":{"x","y","z","world"}|null,"missing":[str],"reason":str}
+SB|v1|assign|{"ok":bool,...}   SB|v1|unassign|{...}   SB|v1|scan|{...}   SB|v1|check|{...}
+```
+
+Positions are bed **head** blocks.
+
+### RS|v1 (RealisticSeasons, other repo)
+
+```
+/temp raw <x> <y> <z> [world]  ->  RS|v1|temp|{json}
+/room raw <x> <y> <z> [world]  ->  RS|v1|room|{json}
+json: inside bool, sealed bool, volume int, leaks {small:int,large:int}, tempC number,
+      outsideC number, season "WINTER"|..., comfortable bool
+```
+
+Unknown command (plugin not installed) ⇒ seasons disabled for the rest of the run.
+RealisticSeasons Java API used by the bridge via reflection:
+`io.github.tadzi00.realisticseasons.api.RealisticSeasonsAPI` registered in `ServicesManager`.
+
+Changing a contract: add a `v2` line, keep `v1` until both sides migrate.
+
+## 10. LLM provider layer
+
+`LLMProvider.complete({system, messages, maxTokens, temperature, model}) → {text}`.
+
+- `ollama`: `/api/chat`, `format: "json"`, `stream: false`, `keep_alive`.
+- `openai-compatible`: `/chat/completions`, optional bearer key from env, `response_format: json_object`
+  (disable via `jsonMode: false` for servers that reject it).
+- `anthropic`: `/v1/messages` with `x-api-key` + `anthropic-version: 2023-06-01`. **`temperature` is
+  deliberately not sent** (current Claude models reject non-default sampling params); optional
+  `output_config.effort`. Only `text` blocks are used; `stop_reason: refusal` is an error.
+- Each provider instance is shared by all bots and wrapped in a FIFO queue with `concurrency`
+  (default 1 — a single local GPU). Timeouts via `AbortSignal.timeout`, retries with exponential
+  backoff on network errors / 408 / 429 / 5xx only.
+
+## 11. Logging
+
+Console: concise one-liners (`LOG_LEVEL`). JSONL per bot in `logs/<name>.jsonl`: `spawn`, `heard`,
+`decision` (observation **hash**, raw model text, validity), `skill` (args, result, ms), `reflex`,
+`planner_error`, `death`; plus `logs/orchestrator.jsonl` (`seed`, `birth`, `death`). Full observations
+are not logged (size); the hash lets you spot repeated identical situations.
+
+## 12. Known limitations
+
+- **Not tested against a live server in this repo's CI.** Unit tests cover pure logic; mineflayer code is
+  type-checked only. Expect tuning work on real terrain.
+- `build_shelter` assumes roughly flat ground and an empty footprint; trees/slopes cause failed
+  placements (reported in the result). The doorway is sealed with blocks if no door can be made.
+- Bed orientation in `place_bed` relies on mineflayer looking toward the placement point.
+- Death cause is taken from the server's system death message (heuristic); fallback is a generic text.
+- Lectern reading uses `openBlock` and reads slot 0 of the lectern window; not verified on all versions.
+- `signBook` is used through an untyped mineflayer API; if missing, the book is written but unsigned.
+- The built-in room check treats open doors as walls and ignores temperature.
+- Beds placed while the plugin was not installed are unknown until `/survivors scan`.
+- Temperature is polled every `temperatureCheckSeconds`, so the cold reflex can lag that long.
+- `smelt` waits a fixed ~10 s per item and may return partial results.
+
+## 13. Not bugs
+
+- A bot that dies **never comes back**, and its name is never reused.
+- Bots ignore chat from far-away or invisible players.
+- A basic bot is not promoted when a smart bot dies; the next newborn is smart instead.
+- The population does not grow when every bot has a bed but there is no **extra** free valid bed.
+- A bed in a leaky / unheated room does not count (with RealisticSeasons, "comfortable" is required).
+- A bot's second and later beds are left **unclaimed** on purpose (they are for newborns).
+- The planner sometimes "wastes" a turn after a reflex interrupt — it re-plans from fresh state.
+- `/temp raw` "Unknown command" in the logs once at startup when RealisticSeasons is not installed.
+- The LLM sees an abbreviated observation (counts + nearest position per block type), not the world.
+- With `concurrency: 1`, bots queue for the GPU; decisions can lag behind with many bots.

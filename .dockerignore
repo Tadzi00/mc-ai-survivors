@@ -1,0 +1,10 @@
+node_modules
+dist
+logs
+state
+data
+plugins
+bridge-plugin
+.env
+.git
+config.yaml

@@ -1,0 +1,14 @@
+# SurvivorsBridge configuration
+room-check:
+  # auto: use RealisticSeasons API when installed, otherwise the built-in enclosure check
+  # builtin: always use the built-in enclosure check (ignores temperature)
+  mode: auto
+  # Built-in check: maximum number of air blocks a room may have
+  max-volume: 512
+auto-assign:
+  # Assign a bed to a player when they sleep in it / set their spawn there
+  enabled: true
+  # Only players whose name matches this regex get auto-assigned (e.g. '^Surv_\d+$')
+  name-pattern: '.*'
+  # If false, a bed already owned by another player is never auto-reassigned
+  steal-owned-beds: false
