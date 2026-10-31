@@ -400,5 +400,10 @@ are not logged (size); the hash lets you spot repeated identical situations.
   netherite) every 10 s and right after picking something up. Leather is warmest but lowest tier: tier wins.
 - `gather` also mines more valuable ores it passes within 8 blocks (diamond > iron > gold > coal > copper >
   redstone/lapis, only if its tool can harvest them, max 8 per call) and reports "also mined ...".
+- `build_shelter` hollows out up to 20 natural blocks inside its outline and refuses when the spot is more
+  solid than that ("too enclosed, move to open ground"); it puts the door on the wall side with the most free
+  space outside and digs a 2-block exit in front of it. (It used to build "shelters" that were solid stone
+  inside a hill, with the door facing rock.)
+- `sleep` walks to a standable spot next to the bed (either half) instead of at the bed block itself.
 - Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
   `exclusionAreasBreak`), so they don't tunnel out of their own shelter.

@@ -2,7 +2,7 @@ import type { Entity } from 'prismarine-entity';
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { fmtPos, gotoNear, nearestBlock } from '../helpers.js';
+import { fmtPos, gotoNear, isStandable, nearestBlock, v3 } from '../helpers.js';
 
 export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): Entity | undefined {
   const { bot } = ctx;
@@ -84,7 +84,28 @@ export async function sleepSkill(ctx: SkillContext): Promise<string> {
     bed = nearestBlock(bot, beds, 32) ?? null;
   }
   if (!bed) return 'no bed known or nearby (craft one: 3 wool + 3 planks, then place_bed)';
-  await gotoNear(ctx, bed.position.x, bed.position.y, bed.position.z, 2, 60_000);
+  // Walk to a free spot NEXT to the bed (either half), not at the bed itself: aiming at the bed block made
+  // the pathfinder push into it.
+  const b0 = bed.position;
+  const halves = [b0, ...[v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].map((o) => b0.plus(o)).filter((p) => bot.isABed(bot.blockAt(p)!))];
+  const spots = halves
+    .flatMap((h) => [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].map((o) => h.plus(o)))
+    .filter((p) => !halves.some((h) => h.equals(p)) && isStandable(bot, p))
+    .sort((p, q) => p.distanceTo(bot.entity.position) - q.distanceTo(bot.entity.position));
+  if (bot.entity.position.distanceTo(b0.offset(0.5, 0.5, 0.5)) > 2.5) {
+    if (spots.length === 0) return `the bed at ${fmtPos(b0)} is blocked in (no free spot next to it)`;
+    let reached = false;
+    for (const sp of spots.slice(0, 3)) {
+      try {
+        await gotoNear(ctx, sp.x, sp.y, sp.z, 0, 30_000);
+        reached = true;
+        break;
+      } catch {
+        throwIfAborted(ctx.signal);
+      }
+    }
+    if (!reached) return `could not reach the bed at ${fmtPos(b0)}`;
+  }
   throwIfAborted(ctx.signal);
   try {
     await bot.sleep(bed);

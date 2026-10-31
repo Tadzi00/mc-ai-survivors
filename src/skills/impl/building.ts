@@ -4,7 +4,7 @@ import { throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import {
-  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, placeItemAt, v3, type Vec3,
+  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, MAN_MADE_RE, placeItemAt, v3, type Vec3,
 } from '../helpers.js';
 import { craftSkill } from './resources.js';
 
@@ -57,7 +57,32 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
   const origin = bot.entity.position.floored();
   const half = Math.floor(s / 2);
   const x0 = origin.x - half, z0 = origin.z - half, x1 = x0 + s - 1, z1 = z0 + s - 1, y0 = origin.y;
-  const doorX = x0 + half, doorZ = z1;
+
+  // The inside must be (or be made) empty: a "shelter" in a hillside used to be solid stone with a door
+  // into rock. Dig out a few natural blocks; refuse if the spot is mostly solid.
+  const interior: Vec3[] = [];
+  for (let x = x0 + 1; x <= x1 - 1; x++) for (let z = z0 + 1; z <= z1 - 1; z++) for (let dy = 0; dy < 3; dy++) interior.push(v3(x, y0 + dy, z));
+  const solidInside = interior.filter((p) => bot.blockAt(p)?.boundingBox === 'block');
+  if (solidInside.length > 20) {
+    return `too enclosed here (${solidInside.length} solid blocks inside the outline, maybe inside a hill/cave); move to open flat ground (explore) and retry`;
+  }
+  if (solidInside.some((p) => MAN_MADE_RE.test(bot.blockAt(p)!.name) || ctx.protectedAreas?.contains(p))) {
+    return 'something built is in the way here; move a few blocks and retry';
+  }
+
+  // Door on the wall side that opens to free space (feet+head free, ground below just outside).
+  const sides = [
+    { x: x0 + half, z: z1, out: v3(0, 0, 1) },
+    { x: x0 + half, z: z0, out: v3(0, 0, -1) },
+    { x: x1, z: z0 + half, out: v3(1, 0, 0) },
+    { x: x0, z: z0 + half, out: v3(-1, 0, 0) },
+  ];
+  const openness = (d: (typeof sides)[number]): number => {
+    const o = v3(d.x, y0, d.z).plus(d.out);
+    return (isAirLike(bot.blockAt(o)) ? 1 : 0) + (isAirLike(bot.blockAt(o.offset(0, 1, 0))) ? 1 : 0) + (isSolid(bot.blockAt(o.offset(0, -1, 0))) ? 1 : 0);
+  };
+  const doorSide = [...sides].sort((p, q) => openness(q) - openness(p))[0]!;
+  const doorX = doorSide.x, doorZ = doorSide.z;
 
   const wall: Vec3[] = [];
   const roof: Vec3[] = [];
@@ -99,6 +124,21 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
 
   // Stand in the centre so everything is within reach.
   await gotoNear(ctx, origin.x, origin.y, origin.z, 0, 15_000).catch(() => undefined);
+
+  // Hollow out the inside, and clear the way out in front of the door (2 blocks out, feet + head).
+  for (const p of solidInside) {
+    const b = bot.blockAt(p);
+    if (b && b.boundingBox === 'block' && bot.canDigBlock(b)) await bot.dig(b, true).catch(() => undefined);
+  }
+  for (let k = 1; k <= 2; k++) {
+    const o = v3(doorX, y0, doorZ).plus(doorSide.out.scaled(k));
+    for (const p of [o, o.offset(0, 1, 0)]) {
+      const b = bot.blockAt(p);
+      if (b && b.boundingBox === 'block' && !MAN_MADE_RE.test(b.name) && !ctx.protectedAreas?.contains(p) && bot.canDigBlock(b)) {
+        await bot.dig(b, true).catch(() => undefined);
+      }
+    }
+  }
 
   let placed = 0, failed = 0, replaced = 0;
   for (const p of [...floor, ...wall, ...roof]) {
