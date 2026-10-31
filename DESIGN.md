@@ -404,6 +404,10 @@ are not logged (size); the hash lets you spot repeated identical situations.
   solid than that ("too enclosed, move to open ground"); it puts the door on the wall side with the most free
   space outside and digs a 2-block exit in front of it. (It used to build "shelters" that were solid stone
   inside a hill, with the door facing rock.)
+- `chest_store` / `chest_take` report what really moved, measured on the chest side (the player-inventory
+  view lags while a container is open). Every chest the bot opens is remembered as place `chest` with a
+  note "contains ..." shown in the observation; `chest_take {items:["list"]}` just looks inside.
+  `scripts/chest-test.mjs` is a live smoke test.
 - `sleep` walks to a standable spot next to the bed (either half) instead of at the bed block itself.
 - Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
   `exclusionAreasBreak`), so they don't tunnel out of their own shelter.

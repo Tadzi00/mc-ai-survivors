@@ -82,7 +82,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   place_torch: 'place_torch {} place a torch next to you (light + heat)',
   farm: 'farm {action:"till"|"plant"|"harvest",crop}',
   chest_store: 'chest_store {items:["oak_log:10","cobblestone"]} put items into nearest chest',
-  chest_take: 'chest_take {items:[...]} take items from nearest chest',
+  chest_take: 'chest_take {items:["iron_ingot:5"]} take items from nearest chest; {items:["list"]} just looks inside',
   give: 'give {player,item,count} toss items to a nearby player',
   check_temperature: 'check_temperature {} temperature/season/room seal status at your position',
   say: 'say {text} talk; only players within 15 blocks hear it',

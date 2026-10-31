@@ -2,6 +2,7 @@ import type { Block } from 'prismarine-block';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import { fmtPos, gotoNear, nearestBlock } from '../helpers.js';
+import { sleep } from '../../util/time.js';
 import { nearestEntity } from './survival.js';
 
 function parseItemSpec(spec: string): { name: string; count?: number } {
@@ -9,6 +10,20 @@ function parseItemSpec(spec: string): { name: string; count?: number } {
   const count = c ? Number.parseInt(c, 10) : undefined;
   return { name: name!.trim().toLowerCase(), count: Number.isFinite(count) ? count : undefined };
 }
+
+/** Remember what a chest holds (shown as a place note in the observation; shareable knowledge). */
+function rememberChest(ctx: SkillContext, block: Block, items: Array<{ name: string; count: number }>): void {
+  const sum = new Map<string, number>();
+  for (const i of items) sum.set(i.name, (sum.get(i.name) ?? 0) + i.count);
+  const note = sum.size ? [...sum].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${c} ${n}`).join(', ') : 'empty';
+  ctx.memory.setPlace('chest', { ...block.position, note: `contains ${note}` });
+}
+
+const invCount = (ctx: SkillContext, name: string): number =>
+  ctx.bot.inventory.items().filter((i) => i.name === name).reduce((n, i) => n + i.count, 0);
+/** Count inside the open chest. While a container is open the player-inventory view lags, the chest side doesn't. */
+const chestCount = (chest: { containerItems(): Array<{ name: string; count: number }> }, name: string): number =>
+  chest.containerItems().filter((i) => i.name === name).reduce((n, i) => n + i.count, 0);
 
 async function openNearestChest(ctx: SkillContext): Promise<{ block: Block } | string> {
   const { bot } = ctx;
@@ -28,22 +43,29 @@ export async function chestStoreSkill(ctx: SkillContext, a: SkillArgsOf<'chest_s
   try {
     for (const spec of a.items) {
       const { name, count } = parseItemSpec(spec);
-      const matching = bot.inventory.items().filter((i) => (name === 'all' ? true : i.name === name));
-      for (const it of matching) {
-        const n = Math.min(it.count, count ?? it.count);
+      const names = [...new Set(bot.inventory.items().filter((i) => (name === 'all' ? true : i.name === name)).map((i) => i.name))];
+      if (names.length === 0) done.push(`no ${name} in inventory`);
+      for (const n of names) {
+        const have = invCount(ctx, n);
+        const inChestBefore = chestCount(chest, n);
         try {
-          await chest.deposit(it.type, null, n);
-          done.push(`${n} ${it.name}`);
+          await chest.deposit(bot.registry.itemsByName[n]!.id, null, Math.min(have, count ?? have));
         } catch (e) {
-          done.push(`failed ${it.name}: ${(e as Error).message}`);
+          done.push(`failed ${n}: ${(e as Error).message}`);
         }
-        if (count !== undefined) break;
+        await sleep(250);
+        const moved = chestCount(chest, n) - inChestBefore; // what really arrived in the chest
+        if (moved > 0) done.push(`${moved} ${n}`);
       }
     }
+    rememberChest(ctx, found.block, chest.containerItems());
   } finally {
     chest.close();
   }
-  return done.length ? `stored ${done.join(', ')} at chest ${fmtPos(found.block.position)}` : 'nothing matching to store';
+  const stored = done.filter((d) => /^\d/.test(d));
+  const problems = done.filter((d) => !/^\d/.test(d));
+  if (!stored.length) return `stored nothing${problems.length ? ` (${problems.join('; ')})` : ''}`;
+  return `stored ${stored.join(', ')} in chest ${fmtPos(found.block.position)}${problems.length ? ` (${problems.join('; ')})` : ''}`;
 }
 
 export async function chestTakeSkill(ctx: SkillContext, a: SkillArgsOf<'chest_take'>): Promise<string> {
@@ -52,30 +74,33 @@ export async function chestTakeSkill(ctx: SkillContext, a: SkillArgsOf<'chest_ta
   if (typeof found === 'string') return found;
   const chest = await bot.openContainer(found.block);
   const done: string[] = [];
+  let left = '';
   try {
     const contents = chest.containerItems();
     for (const spec of a.items) {
       const { name, count } = parseItemSpec(spec);
-      const it = contents.find((i) => i.name === name);
-      if (!it) {
-        done.push(`no ${name}`);
+      if (name === 'list' || name === '?') continue;
+      const inChest = contents.filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
+      if (!inChest) {
+        done.push(`no ${name} in chest`);
         continue;
       }
-      const n = Math.min(count ?? it.count, contents.filter((i) => i.name === name).reduce((s, i) => s + i.count, 0));
       try {
-        await chest.withdraw(it.type, null, n);
-        done.push(`${n} ${name}`);
+        await chest.withdraw(bot.registry.itemsByName[name]!.id, null, Math.min(count ?? inChest, inChest));
       } catch (e) {
         done.push(`failed ${name}: ${(e as Error).message}`);
       }
+      await sleep(250);
+      const got = inChest - chestCount(chest, name); // what really left the chest
+      if (got > 0) done.push(`took ${got} ${name}`);
     }
-    if (a.items.length === 0 || done.length === 0) {
-      done.push(`chest has: ${contents.map((i) => `${i.count} ${i.name}`).join(', ') || 'nothing'}`);
-    }
+    const now = chest.containerItems();
+    rememberChest(ctx, found.block, now);
+    left = now.length ? now.map((i) => `${i.count} ${i.name}`).join(', ') : 'nothing';
   } finally {
     chest.close();
   }
-  return `took ${done.join(', ')}`;
+  return `${done.join('; ') || 'looked inside'}. Chest ${fmtPos(found.block.position)} now has: ${left}`;
 }
 
 export async function giveSkill(ctx: SkillContext, a: SkillArgsOf<'give'>): Promise<string> {

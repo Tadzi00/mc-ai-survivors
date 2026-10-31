@@ -121,7 +121,7 @@ export function buildObservation(o: ObservationInput): string {
     lines.push('Heard recently:');
     for (const h of o.heard.slice(-6)) lines.push(`  ${formatHeard(h, me)}`);
   }
-  const places = Object.entries(memory.data.places).map(([k, p]) => `${k} ${fmtPos(p)}`);
+  const places = Object.entries(memory.data.places).map(([k, p]) => `${k} ${fmtPos(p)}${p.note ? ` (${p.note})` : ''}`);
   lines.push(`Known places: ${places.join('; ') || 'none'}.`);
   const disc = [...(memory.data.discoveries ?? [])]
     .map((d) => ({ d, dist: distance(me, d) }))
