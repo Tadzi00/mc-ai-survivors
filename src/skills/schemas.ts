@@ -33,6 +33,7 @@ export const SkillArgs = {
   build_shelter: z.object({ size: z.coerce.number().int().min(4).max(7).default(5) }),
   place_bed: z.object({}).passthrough(),
   add_door: z.object({}).passthrough(),
+  plant_sapling: z.object({ count: z.coerce.number().int().min(1).max(8).default(2) }),
   place_torch: z.object({}).passthrough(),
   farm: z.object({
     action: z.enum(['till', 'plant', 'harvest']),
@@ -79,6 +80,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   place_block: 'place_block {block,x?,y?,z?} place an item block (near you if no coords)',
   build_shelter: 'build_shelter {size 4-7} build a sealed room around you: walls, roof, door, torch. Needs ~70 blocks for size 5 + door + torch',
   place_bed: 'place_bed {} place a bed from inventory next to you (do it INSIDE a shelter)',
+  plant_sapling: 'plant_sapling {count} plant saplings on grass/dirt nearby (new trees = wood later)',
   add_door: 'add_door {} put a door into your shelter if it has none (crafts one from 6 planks)',
   place_torch: 'place_torch {} place a torch next to you (light + heat)',
   farm: 'farm {action:"till"|"plant"|"harvest",crop}',

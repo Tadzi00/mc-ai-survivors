@@ -285,3 +285,46 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
   }
   return 'no room for a bed here (needs 2 free floor blocks in a line next to me)';
 }
+
+/**
+ * plant_sapling: plant up to `count` saplings from the inventory on grass/dirt within 5 blocks that has 2
+ * free blocks above and no other sapling/log within 2 blocks (room to grow).
+ */
+export async function plantSaplingSkill(ctx: SkillContext, a: SkillArgsOf<'plant_sapling'>): Promise<string> {
+  const { bot } = ctx;
+  let planted = 0;
+  for (let i = 0; i < a.count; i++) {
+    const sapling = findItem(bot, /_sapling$|^mangrove_propagule$/);
+    if (!sapling) break;
+    const base = bot.entity.position.floored();
+    let spot: Vec3 | undefined;
+    for (let r = 1; r <= 5 && !spot; r++) {
+      for (let dx = -r; dx <= r && !spot; dx++) {
+        for (let dz = -r; dz <= r && !spot; dz++) {
+          for (const dy of [0, -1, 1]) {
+            const p = base.offset(dx, dy, dz);
+            const ground = bot.blockAt(p.offset(0, -1, 0))?.name ?? '';
+            if (!/^(grass_block|dirt|podzol|coarse_dirt|rooted_dirt|moss_block|mud)$/.test(ground)) continue;
+            if (!isAirLike(bot.blockAt(p)) || !isAirLike(bot.blockAt(p.offset(0, 1, 0)))) continue;
+            if (p.equals(base) || p.equals(base.offset(0, 1, 0))) continue;
+            let crowded = false;
+            for (let ox = -2; ox <= 2 && !crowded; ox++) for (let oz = -2; oz <= 2 && !crowded; oz++) {
+              const n = bot.blockAt(p.offset(ox, 0, oz))?.name ?? '';
+              if (n.endsWith('_sapling') || n.endsWith('_log')) crowded = true;
+            }
+            if (!crowded) {
+              spot = p;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!spot) break;
+    if (await placeItemAt(ctx, sapling, spot)) planted++;
+    else break;
+  }
+  if (planted === 0) return findItem(bot, /_sapling$/) ? 'no free grass/dirt spot with room to grow nearby' : 'no saplings in inventory (leaves drop them)';
+  ctx.memory.discover('planted saplings', bot.entity.position);
+  return `planted ${planted} sapling(s); they grow into trees in a few days`;
+}

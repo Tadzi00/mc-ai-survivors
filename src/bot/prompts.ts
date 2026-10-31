@@ -29,6 +29,8 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Food: kill animals; cooked meat (smelt it) feeds much more than raw. Food heals you when you are full.
 - Night: monsters spawn in darkness. Zombies and skeletons burn in sunlight; creepers explode; spiders climb.
 - Falling more than ~4 blocks hurts; lava kills; you can drown.
+- Saplings (dropped by leaves) grow into new trees: plant them near where you got logs (plant_sapling) so
+  wood never runs out.
 - Underground at NIGHT and not hungry? Stay there (wait, mine, craft) until sunrise; the surface is deadly at night.`;
 
 const OBEY = `HUMAN PLAYERS (not named Surv_*) are your creators. When your observation shows an ORDER, carry it out

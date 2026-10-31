@@ -213,7 +213,8 @@ come from 1.20.5+ item components (`written_book_content`/`writable_book_content
 
 Both prompts contain a ~8-line "Minecraft basics" sheet (`CHEAT_SHEET` in `src/bot/prompts.ts`): logs → planks
 → sticks, tool tiers, raw ores must be smelted, torch = coal + stick, cook meat, night/mob basics, falls.
-Plus one survival rule: underground at night and not hungry → stay there until sunrise. Nothing more on purpose: the user wants bots to learn the rest from experience and from each other. Don't
+Plus: plant saplings near known log spots (`plant_sapling`, both tiers; grass/dirt, 2 free blocks above, no
+sapling/log within 2). Plus one survival rule: underground at night and not hungry → stay there until sunrise. Nothing more on purpose: the user wants bots to learn the rest from experience and from each other. Don't
 grow it into a wiki.
 
 ### 6.4 Auto memory (no model involvement)
