@@ -874,6 +874,7 @@ export class BotAgent {
       planNote: this.planNote ?? this.repeatedFailureNote(),
       shoutCooldown: shoutCooldownLeft(this.name, this.deps.config.shout.cooldownSeconds),
       chatRange: this.deps.config.chatRange,
+      helpActive: !!this.helpCall,
       silentSeconds: (Date.now() - this.lastSpokeAt) / 1000,
     });
     this.interruptedBy = undefined;

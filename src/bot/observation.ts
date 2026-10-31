@@ -23,6 +23,8 @@ export interface ObservationInput {
   shoutCooldown?: number;
   /** say range, for the "who can hear you" line. */
   chatRange?: number;
+  /** True while this bot still has an open rescue (help call not reached/answered/dead). */
+  helpActive?: boolean;
   /** Seconds since this bot last said/shouted anything. */
   silentSeconds?: number;
 }
@@ -133,7 +135,7 @@ export function buildObservation(o: ObservationInput): string {
     const quiet = o.silentSeconds !== undefined && o.silentSeconds > 90 ? ` You haven't talked for ${Math.round(o.silentSeconds / 60)} min.` : '';
     lines.push(`In talking range (say): ${near.join(', ')}.${quiet} Tell them what you found or learned, ask what they know, agree who does what.`);
   }
-  const help = o.heard.filter((h) => h.kind === 'shout' && /help/i.test(h.text) && Date.now() - h.at < 90_000).at(-1);
+  const help = !o.helpActive ? undefined : o.heard.filter((h) => h.kind === 'shout' && /help/i.test(h.text) && Date.now() - h.at < 90_000).at(-1);
   if (help) {
     const c = /(-?\d+) (-?\d+) (-?\d+)/.exec(help.text);
     const at = c ? { x: Number(c[1]), y: Number(c[2]), z: Number(c[3]) } : help.pos;
