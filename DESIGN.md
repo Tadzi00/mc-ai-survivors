@@ -236,6 +236,16 @@ to think about why and write a conclusion instead of repeating. The observation 
 is OUTDOORS / under cover / UNDERGROUND (sky light at head height), which is what most wrong conclusions
 were missing (e.g. hunting cows in a cave). Conclusions can be wrong; that is part of the experiment.
 
+### 6.4.2 Mentoring and utilities
+
+- The discovery scan also records crafting tables, furnaces/smokers, chests/barrels and beds.
+- After `chest_store`/`chest_take` the bot says what it stored/took and where (15-block say), so nearby
+  bots and players learn where things are. (Listeners do not yet parse it into their chest memory.)
+- A bot born this run gets a mentor 4 s after its first spawn: the nearest living bot (roster distance)
+  copies its home (as the newborn's `village`), crafting table/chest/furnace places (with contents), last 12
+  discoveries and last 8 lessons ("From <mentor>: ...") into the newborn's memory, and whispers a welcome
+  summary. Done in code on purpose: reliable, and newborns no longer start by chopping wood for a table.
+
 ### 6.5 Memory (manual)
 
 `state/bots/<name>.json`: goal, notes, known places (home, bed, chest, furnace, crafting_table).

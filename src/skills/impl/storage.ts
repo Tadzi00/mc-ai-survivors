@@ -65,6 +65,8 @@ export async function chestStoreSkill(ctx: SkillContext, a: SkillArgsOf<'chest_s
   const stored = done.filter((d) => /^\d/.test(d));
   const problems = done.filter((d) => !/^\d/.test(d));
   if (!stored.length) return `stored nothing${problems.length ? ` (${problems.join('; ')})` : ''}`;
+  const c = found.block.position;
+  bot.chat(`Stored ${stored.join(', ')} in the chest at ${c.x} ${c.y} ${c.z}`); // others nearby hear where things are
   return `stored ${stored.join(', ')} in chest ${fmtPos(found.block.position)}${problems.length ? ` (${problems.join('; ')})` : ''}`;
 }
 
@@ -100,6 +102,9 @@ export async function chestTakeSkill(ctx: SkillContext, a: SkillArgsOf<'chest_ta
   } finally {
     chest.close();
   }
+  const took = done.filter((d) => d.startsWith('took '));
+  const c = found.block.position;
+  if (took.length) bot.chat(`${took.join(', ').replace(/^took/, 'Took')} from the chest at ${c.x} ${c.y} ${c.z}`);
   return `${done.join('; ') || 'looked inside'}. Chest ${fmtPos(found.block.position)} now has: ${left}`;
 }
 

@@ -70,6 +70,11 @@ const DISCOVERY_BLOCKS: Array<[string, (n: string) => boolean]> = [
   ['sand', (n) => n === 'sand'],
   ['clay', (n) => n === 'clay'],
   ['sugar_cane', (n) => n === 'sugar_cane'],
+  // utilities (someone's base, useful to find again)
+  ['crafting_table', (n) => n === 'crafting_table'],
+  ['furnace', (n) => n === 'furnace' || n === 'smoker' || n === 'blast_furnace'],
+  ['chest', (n) => n === 'chest' || n === 'barrel'],
+  ['bed', (n) => n.endsWith('_bed')],
 ];
 const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit']);
 
@@ -586,6 +591,34 @@ export class BotAgent {
     this.memory.save();
     if (manual) this.jsonl.write('forget', { needle, removed: count });
     return `Forgot ${count} thing(s) about "${needle}".`;
+  }
+
+  /**
+   * Mentor a newborn: hand over home/village, utilities (crafting table, chest + contents, furnace), recent
+   * finds and best lessons (in code, reliable), and whisper a welcome summary (visible to players).
+   */
+  mentor(student: BotAgent): void {
+    const m = this.memory;
+    const lines: string[] = [];
+    const home = m.place('home') ?? m.place('village');
+    if (home) {
+      student.memory.setPlace('village', { ...home, note: `${this.name}'s home` });
+      lines.push(`our home is at ${home.x} ${home.y} ${home.z}`);
+    }
+    for (const k of ['crafting_table', 'chest', 'furnace']) {
+      const p = m.place(k);
+      if (!p) continue;
+      student.memory.setPlace(k, p);
+      lines.push(`${k.replace('_', ' ')} at ${p.x} ${p.y} ${p.z}${p.note ? ` (${p.note})` : ''}`);
+    }
+    for (const d of (m.data.discoveries ?? []).slice(-12)) student.memory.discover(d.what, d);
+    const lessons = (m.data.lessons ?? []).filter((l) => !/^DEATH/.test(l)).slice(-8);
+    for (const l of lessons) student.memory.learn(`From ${this.name}: ${l.replace(/^Taught by \w+: /, '')}`);
+    student.memory.learn(`${this.name} is my mentor; ask them when unsure`);
+    this.jsonl.write('mentor', { student: student.name, shared: lines.length, lessons: lessons.length });
+    this.log('info', `mentoring ${student.name}: ${lines.length} places, ${lessons.length} lessons`);
+    const text = `Welcome ${student.name}! ${lines.join('; ') || 'we have no base yet'}. ${lessons.length ? `Tips: ${lessons.slice(0, 3).join(' | ')}` : ''}`;
+    for (const part of text.match(/.{1,230}(\s|$)/g) ?? [text]) this.bot?.whisper(student.name, part.trim());
   }
 
   /** "You failed X 2+ times in a row - why?" so the model draws a conclusion instead of looping. */

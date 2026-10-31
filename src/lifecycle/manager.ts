@@ -105,6 +105,7 @@ export class LifecycleManager {
     this.state.nameCounter = n.counter;
     this.state.add({ name, tier, status: 'alive', bornAt: new Date().toISOString(), bed });
     this.jsonl.write('birth', { name, tier, bed });
+    this.fresh.add(name);
     if (bed && this.config.population.spawnAtBed) this.newborns.set(name, bed);
     this.launch(name, tier, bed);
   }
@@ -132,7 +133,28 @@ export class LifecycleManager {
       });
   }
 
+  /** Bots born this run (not resumed): they get a mentor on first spawn. */
+  private readonly fresh = new Set<string>();
+
+  /** The nearest other living bot teaches the newborn what it knows (see BotAgent.mentor). */
+  private assignMentor(student: BotAgent): void {
+    const me = this.deps.roster.get(student.name, 60_000);
+    let best: BotAgent | undefined;
+    let bestD = Infinity;
+    for (const a of this.agents.values()) {
+      if (a === student || a.isDead) continue;
+      const p = this.deps.roster.get(a.name, 60_000);
+      const d = me && p ? Math.hypot(p.x - me.x, p.y - me.y, p.z - me.z) : 1e9;
+      if (d < bestD) {
+        best = a;
+        bestD = d;
+      }
+    }
+    if (best) best.mentor(student);
+  }
+
   private async onSpawn(agent: BotAgent): Promise<void> {
+    if (this.fresh.delete(agent.name)) setTimeout(() => this.assignMentor(agent), 4_000);
     const bed = this.newborns.get(agent.name);
     if (!bed) return;
     this.newborns.delete(agent.name);
