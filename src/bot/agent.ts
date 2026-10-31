@@ -188,6 +188,10 @@ export class BotAgent {
       moves.canDig = true;
       moves.allowParkour = false; // fewer fatal falls
       moves.allowSprinting = true;
+      // No scaffolding: the pathfinder used to place dirt/cobblestone to climb or bridge and then dig it out
+      // again a moment later (pointless place/break loops, wasted blocks). Walk around instead.
+      moves.scafoldingBlocks = [];
+      moves.allow1by1towers = false;
       if (this.deps.rcon && this.deps.config.bot.serverCrafting) enableServerCrafting(bot, this.name, this.deps.rcon);
       // Use doors instead of digging through walls (Paper handles door opening fine).
       moves.canOpenDoors = true;

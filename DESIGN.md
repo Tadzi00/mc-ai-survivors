@@ -213,7 +213,7 @@ come from 1.20.5+ item components (`written_book_content`/`writable_book_content
 
 Both prompts contain a ~8-line "Minecraft basics" sheet (`CHEAT_SHEET` in `src/bot/prompts.ts`): logs → planks
 → sticks, tool tiers, raw ores must be smelted, torch = coal + stick, cook meat, night/mob basics, falls.
-Nothing more on purpose: the user wants bots to learn the rest from experience and from each other. Don't
+Plus one survival rule: underground at night and not hungry → stay there until sunrise. Nothing more on purpose: the user wants bots to learn the rest from experience and from each other. Don't
 grow it into a wiki.
 
 ### 6.4 Auto memory (no model involvement)
@@ -423,5 +423,7 @@ are not logged (size); the hash lets you spot repeated identical situations.
   note "contains ..." shown in the observation; `chest_take {items:["list"]}` just looks inside.
   `scripts/chest-test.mjs` is a live smoke test.
 - `sleep` walks to a standable spot next to the bed (either half) instead of at the bed block itself.
+- Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge
+  and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
   `exclusionAreasBreak`), so they don't tunnel out of their own shelter.

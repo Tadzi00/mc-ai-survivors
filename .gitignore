@@ -14,3 +14,4 @@ bridge-plugin/.gradle/
 .idea/
 .vscode/
 state.old-*/
+backups/
