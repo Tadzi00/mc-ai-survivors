@@ -42,13 +42,20 @@ export function shoutCooldownLeft(name: string, cooldownSeconds: number, now = D
  * Sends a shout if allowed (word limit + per-bot cooldown). Used by the shout skill and by the automatic
  * help call when a bot is attacked. Returns undefined on success, or the reason it was refused.
  */
-export function tryShout(bot: Bot, name: string, rawText: string, cfg: { maxWords: number; cooldownSeconds: number }): string | undefined {
+export function tryShout(
+  bot: Bot,
+  name: string,
+  rawText: string,
+  cfg: { maxWords: number; cooldownSeconds: number },
+  /** Scripted status shouts (check-ins and their answers) ignore the cooldown and don't reset it. */
+  urgent = false,
+): string | undefined {
   const text = rawText.replace(/^\//, '').replace(/\s+/g, ' ').trim();
   const words = wordCount(text);
   if (words > cfg.maxWords) return `too long: ${words} words, a shout may have at most ${cfg.maxWords}. Shorten it.`;
   const wait = shoutCooldownLeft(name, cfg.cooldownSeconds);
-  if (wait > 0) return `shout on cooldown, ${wait}s left (use say for nearby players)`;
-  lastShout.set(name, Date.now());
+  if (wait > 0 && !urgent) return `shout on cooldown, ${wait}s left (use say for nearby players)`;
+  if (!urgent) lastShout.set(name, Date.now());
   bot.chat(`${SHOUT_PREFIX}${text}`.slice(0, 250));
   return undefined;
 }

@@ -177,6 +177,8 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
     if (torch && isAirLike(bot.blockAt(tp)) && (await placeItemAt(ctx, torch, tp))) torchMsg = 'torch placed';
   }
   ctx.memory.setPlace('home', origin);
+  (ctx.memory.data.shelters ??= []).push({ x0, z0, x1, z1, y0 });
+  ctx.memory.save();
   ctx.memory.addNote(
     `Built shelter (size ${s}) at ${fmtPos(origin)}${doorOk ? ` with door at ${doorX},${y0},${doorZ}` : `; doorway at ${doorX},${y0},${doorZ} is walled up (no door: ${doorWhy.slice(0, 60)})`}.`,
   );
@@ -206,8 +208,11 @@ async function placeDoor(ctx: SkillContext, doorway: Vec3, inside: Vec3): Promis
     await bot.equip(door, 'hand');
     await bot.lookAt(doorway.offset(0.5, 0, 0.5), true);
     await bot.placeBlock(floor!, v3(0, 1, 0));
-  } catch {
-    /* verify below */
+  } catch (e) {
+    ctx.log(
+      `door placement at ${fmtPos(doorway)}: ${(e as Error).message} | held=${bot.heldItem?.name} doors=${countItem(bot, /_door$/)} ` +
+        `me=${fmtPos(bot.entity.position)} floor=${floor?.name} cell=${bot.blockAt(doorway)?.name}/${bot.blockAt(doorway.offset(0, 1, 0))?.name}`,
+    );
   }
   const placed = bot.blockAt(doorway);
   return placed && /_door$/.test(placed.name) ? 'ok' : 'door placement failed';
@@ -327,4 +332,112 @@ export async function plantSaplingSkill(ctx: SkillContext, a: SkillArgsOf<'plant
   if (planted === 0) return findItem(bot, /_sapling$/) ? 'no free grass/dirt spot with room to grow nearby' : 'no saplings in inventory (leaves drop them)';
   ctx.memory.discover('planted saplings', bot.entity.position);
   return `planted ${planted} sapling(s); they grow into trees in a few days`;
+}
+
+/**
+ * extend_shelter: add a room against one side of the bot's shelter. The rooms share that wall and get a
+ * 2-high opening in it, so they form one big sealed space with the original door.
+ */
+export async function extendShelterSkill(ctx: SkillContext, a: SkillArgsOf<'extend_shelter'>): Promise<string> {
+  const { bot } = ctx;
+  const me = bot.entity.position;
+  const list = ctx.memory.data.shelters ?? [];
+  const base = [...list].sort(
+    (p, q) => Math.hypot((p.x0 + p.x1) / 2 - me.x, (p.z0 + p.z1) / 2 - me.z) - Math.hypot((q.x0 + q.x1) / 2 - me.x, (q.z0 + q.z1) / 2 - me.z),
+  )[0];
+  if (!base) return 'no shelter of yours to extend (build_shelter first)';
+  const L = a.length;
+  const y0 = base.y0;
+  // New outline: shares the wall on the chosen side.
+  let box: { x0: number; z0: number; x1: number; z1: number };
+  let shared: Vec3[]; // opening cells in the shared wall (feet + head)
+  const midX = Math.floor((base.x0 + base.x1) / 2), midZ = Math.floor((base.z0 + base.z1) / 2);
+  switch (a.direction) {
+    case 'east':
+      box = { x0: base.x1, x1: base.x1 + L - 1, z0: base.z0, z1: base.z1 };
+      shared = [v3(base.x1, y0, midZ), v3(base.x1, y0 + 1, midZ)];
+      break;
+    case 'west':
+      box = { x0: base.x0 - L + 1, x1: base.x0, z0: base.z0, z1: base.z1 };
+      shared = [v3(base.x0, y0, midZ), v3(base.x0, y0 + 1, midZ)];
+      break;
+    case 'south':
+      box = { x0: base.x0, x1: base.x1, z0: base.z1, z1: base.z1 + L - 1 };
+      shared = [v3(midX, y0, base.z1), v3(midX, y0 + 1, base.z1)];
+      break;
+    default:
+      box = { x0: base.x0, x1: base.x1, z0: base.z0 - L + 1, z1: base.z0 };
+      shared = [v3(midX, y0, base.z0), v3(midX, y0 + 1, base.z0)];
+  }
+  const inBase = (x: number, z: number): boolean => x >= base.x0 && x <= base.x1 && z >= base.z0 && z <= base.z1;
+  const wall: Vec3[] = [];
+  const roof: Vec3[] = [];
+  const floor: Vec3[] = [];
+  const interior: Vec3[] = [];
+  for (let x = box.x0; x <= box.x1; x++) {
+    for (let z = box.z0; z <= box.z1; z++) {
+      const edge = x === box.x0 || x === box.x1 || z === box.z0 || z === box.z1;
+      if (!inBase(x, z)) {
+        floor.push(v3(x, y0 - 1, z));
+        roof.push(v3(x, y0 + 3, z));
+        for (let dy = 0; dy < 3; dy++) (edge ? wall : interior).push(v3(x, y0 + dy, z));
+      }
+    }
+  }
+  const solidInside = interior.filter((p) => bot.blockAt(p)?.boundingBox === 'block');
+  if (solidInside.length > 20) return `too much solid ground on the ${a.direction} side; try another direction`;
+  if ([...solidInside, ...wall].some((p) => ctx.protectedAreas?.contains(p) || (bot.blockAt(p) && MAN_MADE_RE.test(bot.blockAt(p)!.name) && !inBase(p.x, p.z)))) {
+    return `something built is in the way on the ${a.direction} side; try another direction`;
+  }
+  // Roof order: cells next to the existing roof first, so every block has a neighbour to attach to.
+  const sharedX = a.direction === 'east' ? base.x1 : a.direction === 'west' ? base.x0 : undefined;
+  const sharedZ = a.direction === 'south' ? base.z1 : a.direction === 'north' ? base.z0 : undefined;
+  roof.sort((p, q) => (sharedX !== undefined ? Math.abs(p.x - sharedX) - Math.abs(q.x - sharedX) : Math.abs(p.z - sharedZ!) - Math.abs(q.z - sharedZ!)));
+  const cells = [...floor, ...wall, ...roof];
+  const needed = cells.filter((p) => !isGoodShellBlock(bot.blockAt(p))).length;
+  const have = bot.inventory.items().filter((i) => BUILDING_BLOCK_RE.test(i.name)).reduce((n, i) => n + i.count, 0);
+  if (have < needed) return `not enough blocks: need ${needed}, have ${have} (planks/cobblestone/dirt/logs). Gather more first.`;
+
+  const centre = v3(Math.floor((box.x0 + box.x1) / 2), y0, Math.floor((box.z0 + box.z1) / 2));
+  // Open the shared wall FIRST (from inside the old room) so the bot can walk through it into the new room
+  // instead of going out through the door or trying to dig.
+  let opened = 0;
+  const doorThere = shared.some((p) => /_door$/.test(bot.blockAt(p)?.name ?? ''));
+  if (!doorThere) {
+    const inside = v3(midX, y0, midZ);
+    if (bot.entity.position.distanceTo(shared[0]!) > 4) await gotoNear(ctx, inside.x, inside.y, inside.z, 1, 15_000).catch(() => undefined);
+    for (const p of shared) {
+      const b = bot.blockAt(p);
+      if (b && b.boundingBox === 'block' && bot.canDigBlock(b)) {
+        await bot.dig(b, true).catch(() => undefined);
+        opened++;
+      }
+    }
+  }
+  await gotoNear(ctx, centre.x, centre.y, centre.z, 1, 20_000).catch(() => undefined);
+  for (const p of solidInside) {
+    const b = bot.blockAt(p);
+    if (b && b.boundingBox === 'block' && bot.canDigBlock(b)) await bot.dig(b, true).catch(() => undefined);
+  }
+  let placed = 0, failed = 0;
+  for (const p of cells) {
+    throwIfAborted(ctx.signal);
+    const existing = bot.blockAt(p);
+    if (isGoodShellBlock(existing)) continue;
+    if (existing && existing.boundingBox === 'block' && bot.canDigBlock(existing)) await bot.dig(existing, true).catch(() => undefined);
+    const item = pickBuildingItem(ctx);
+    if (!item) break;
+    if (await placeItemAt(ctx, item, p)) placed++;
+    else failed++;
+  }
+  let torchMsg = 'no torch';
+  if (countItem(bot, 'torch') > 0 || (await craftSkill(ctx, { item: 'torch', count: 2 })).startsWith('crafted')) {
+    const torch = findItem(bot, 'torch');
+    const tp = interior.find((p) => isAirLike(bot.blockAt(p)) && p.y === y0 && isSolid(bot.blockAt(p.offset(0, -1, 0))));
+    if (torch && tp && (await placeItemAt(ctx, torch, tp))) torchMsg = 'torch placed';
+  }
+  (ctx.memory.data.shelters ??= []).push({ ...box, y0 });
+  ctx.memory.save();
+  ctx.memory.addNote(`Extended my shelter ${a.direction} by ${L} (${box.x0},${box.z0} to ${box.x1},${box.z1}).`);
+  return `added a room on the ${a.direction} side: placed ${placed} blocks, ${failed} failed, ${opened ? 'opening made in the shared wall' : doorThere ? 'rooms connected through the old door' : 'shared wall already open'}, ${torchMsg}`;
 }

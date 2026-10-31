@@ -181,19 +181,31 @@ export async function placeItemAt(ctx: SkillContext, item: Item, pos: Vec3): Pro
   // Don't place inside our own body.
   const feet = bot.entity.position.floored();
   if (pos.equals(feet) || pos.equals(feet.offset(0, 1, 0))) return false;
+  // Success = the block there changed. (Checking "not air-like" wrongly failed torches, which are walk-through.)
+  const before = target.name;
+  const changed = (): boolean => {
+    const now = bot.blockAt(pos)?.name;
+    return !!now && now !== before && now !== 'air' && now !== 'cave_air';
+  };
   for (const f of FACES) {
     const ref = bot.blockAt(pos.plus(f));
     if (!isSolid(ref)) continue;
     try {
-      if (bot.entity.position.distanceTo(pos) > 4.3) await gotoNear(ctx, pos.x, pos.y, pos.z, 3, 20_000);
+      // Reach is measured like Minecraft does: from the eyes to the block centre. (Feet-to-corner made roof
+      // corners look out of reach, so the bot walked "near" them - up the walls onto its own roof.)
+      const eyes = bot.entity.position.offset(0, 1.62, 0);
+      if (eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)) > 4.5) {
+        ctx.log(`walking to place ${item.name} at ${fmtPos(pos)} (${eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)).toFixed(1)} away)`);
+        await gotoNear(ctx, pos.x, pos.y, pos.z, 3, 20_000);
+      }
       await bot.equip(item, 'hand');
       await bot.placeBlock(ref!, f.scaled(-1));
       await sleep(60);
-      return !isAirLike(bot.blockAt(pos));
+      if (changed()) return true;
     } catch (e) {
       ctx.log(`place ${item.name} at ${fmtPos(pos)} against ${ref!.name} failed: ${(e as Error).message}`);
       await sleep(60);
-      if (!isAirLike(bot.blockAt(pos))) return true;
+      if (changed()) return true;
     }
   }
   return false;

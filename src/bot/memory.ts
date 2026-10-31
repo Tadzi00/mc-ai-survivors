@@ -19,6 +19,8 @@ export interface MemoryData {
   lessons?: string[];
   /** Known chests: "x,y,z" -> contents as last seen or heard about. */
   storage?: Record<string, Chest>;
+  /** Outlines of shelters/rooms this bot built (outer walls), for extend_shelter. */
+  shelters?: Array<{ x0: number; z0: number; x1: number; z1: number; y0: number }>;
 }
 
 export interface Chest {

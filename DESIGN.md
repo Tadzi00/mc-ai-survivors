@@ -434,6 +434,17 @@ are not logged (size); the hash lets you spot repeated identical situations.
 - All bots' homes are shared (`HomeRegistry`, updated every second): the pathfinder can't dig within 4
   blocks of ANY bot's home, and the door transit applies to any known home (own, village, teammates'),
   so a visitor uses the door too. A bot without a home used to tunnel through a teammate's shelter wall.
+- Block placement reach is measured from the eyes to the block centre (≤ 4.5) like Minecraft. Feet-to-corner
+  made roof corners look out of reach; the bot pathfound "near" them, i.e. onto its own roof, could then not
+  place the door (server rejected it) and left a hole where it stood. Success = the block there changed
+  (torches are walk-through, the old "not air-like" check reported them as failed).
+- Bigger shelters: `build_shelter` size 4-11. `extend_shelter {direction,length}` builds a room against a
+  side of the nearest own shelter (`memory.shelters` outlines), opening a 2-high gap in the shared wall
+  FIRST and walking through it; if the old door is on that wall the rooms connect through the door.
+  `scripts/shelter-test.mjs` (live) builds 5x5 + east extension and checks both are one sealed room.
+- Check-ins: "are you alive?" questions and their answers are urgent shouts (no cooldown, don't reset it);
+  the helper waits 60 s for an answer. The same question in normal chat is answered in chat, by /msg
+  privately. (Replies used to wait for the shout cooldown and arrive after the helper gave up.)
 - `follow` refuses other bots ("split the work instead"); only humans can be followed. A bot used to spend
   most of its time walking behind its teammate.
 - Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge

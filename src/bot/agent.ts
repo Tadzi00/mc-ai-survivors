@@ -122,7 +122,7 @@ export class BotAgent {
     | { from: string; pos: { x: number; y: number; z: number }; at: number; checkedAt?: number }
     | undefined;
   /** Someone asked if we're alive: reply (as a shout) as soon as our shout cooldown allows. */
-  private pendingAliveReply: { to: string; until: number } | undefined;
+  private pendingAliveReply: { to: string; until: number; via: 'shout' | 'say' | 'whisper' } | undefined;
   /** For !think. */
   private lastThought = '';
   /** A step to run next regardless of the plan queue (player command). */
@@ -246,6 +246,10 @@ export class BotAgent {
       if (this.chat.offer(this.name, username, message, bot.entity?.position, speakerPos, ranges)) {
         this.jsonl.write('heard', { from: username, text: message });
         this.rememberShout(username, message, speakerPos);
+        // "Surv_03, are you alive?" in normal chat -> answer in normal chat.
+        if (!message.startsWith('[SHOUT]') && new RegExp(`\\b${this.name}\\b`, 'i').test(message) && /alive\?|where are you|are you ok/i.test(message)) {
+          this.pendingAliveReply = { to: username, until: Date.now() + 30_000, via: 'say' };
+        }
         // "Stored 15 cobblestone in the chest at x y z" from someone nearby -> update our chest knowledge.
         const report = parseChestReport(message);
         if (report) this.memory.adjustChest(report.pos, report.items, report.sign, username);
@@ -384,7 +388,7 @@ export class BotAgent {
     if (!pos) return;
     // Someone asks whether WE are alive -> answer (scripted, so it happens even mid-task).
     if (new RegExp(`\\b${this.name}\\b`, 'i').test(text) && /alive\?|where are you|are you ok/i.test(text) && !/^\S+: alive at/i.test(text)) {
-      this.pendingAliveReply = { to: from, until: Date.now() + 70_000 };
+      this.pendingAliveReply = { to: from, until: Date.now() + 70_000, via: 'shout' };
       return;
     }
     // The bot we're helping answered our check-in.
@@ -422,11 +426,11 @@ export class BotAgent {
     const call = this.helpCall;
     if (call) {
       if (!call.checkedAt && now - call.at > 30_000) {
-        if (!tryShout(bot, this.name, `${call.from}, are you alive? Where are you?`, this.deps.config.shout)) {
+        if (!tryShout(bot, this.name, `${call.from}, are you alive? Where are you?`, this.deps.config.shout, true)) {
           call.checkedAt = now;
           this.jsonl.write('help_checkin', { to: call.from });
         }
-      } else if (call.checkedAt && now - call.checkedAt > 35_000 && call.at < call.checkedAt) {
+      } else if (call.checkedAt && now - call.checkedAt > 60_000 && call.at < call.checkedAt) {
         this.helpCall = undefined;
         this.memory.learn(`${call.from} called for help but did not answer my check-in (maybe dead)`);
         this.log('info', `${call.from} did not answer; giving up the rescue`);
@@ -441,7 +445,11 @@ export class BotAgent {
       const p = bot.entity.position;
       const danger = this.hostilesWithin(12).length > 0;
       const text = `${ask.to}: alive at ${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}, health ${Math.round(bot.health)}, ${danger ? 'still need help' : 'safe now'}`;
-      if (!tryShout(bot, this.name, text, this.deps.config.shout)) this.pendingAliveReply = undefined;
+      if (ask.via === 'whisper') bot.whisper(ask.to, text);
+      else if (ask.via === 'say') bot.chat(text);
+      else if (tryShout(bot, this.name, text, this.deps.config.shout, true)) return; // (only fails on length)
+      this.pendingAliveReply = undefined;
+      this.jsonl.write('alive_reply', { to: ask.to, via: ask.via });
     }
   }
 
@@ -528,7 +536,7 @@ export class BotAgent {
     this.chat.offerDirect(from, msg);
     this.jsonl.write('heard', { from, text: msg, direct: true });
     // Simple factual questions get an instant, correct answer from code (no model needed).
-    if (/where (are|r) (you|u)|your (location|position|coords)|coordinates/i.test(msg)) {
+    if (/where (are|r) (you|u)|your (location|position|coords)|coordinates|alive\?|are you ok/i.test(msg)) {
       const p = bot.entity.position;
       const sky = bot.blockAt(p.offset(0, 1.6, 0))?.skyLight ?? 15;
       reply(`I'm at ${fmtPos(p)}${sky < 6 ? ' (underground)' : ''}, health ${Math.round(bot.health)}/20, food ${bot.food}/20.`);
