@@ -10,6 +10,8 @@ import type { OrchestratorState } from './state.js';
  * Population lifecycle: seeds the first bots, polls the bridge plugin's spawn rule, spawns newborns
  * into free beds, and handles PERMANENT death (never respawn, never reuse a name).
  */
+const JOIN_SPACING_MS = 5_000;
+
 export class LifecycleManager {
   private readonly agents = new Map<string, BotAgent>();
   private readonly newborns = new Map<string, BedPos>();
@@ -73,6 +75,9 @@ export class LifecycleManager {
         const tiers = assignTiers([], p.smartSlots, decision.count);
         log('info', 'life', `${decision.reason}: spawning ${decision.count} bots`);
         this.jsonl.write('seed', { reason: decision.reason, count: decision.count });
+        if (p.graceOnSeed) {
+          await this.bridge.graceStart().catch((e: unknown) => log('warn', 'life', `grace start failed: ${String(e)}`));
+        }
         for (const tier of tiers) this.birth(tier, null);
         return;
       }
@@ -104,6 +109,8 @@ export class LifecycleManager {
     this.launch(name, tier, bed);
   }
 
+  private nextJoinAt = 0;
+
   private launch(name: string, tier: Tier, bed: BedPos | null): void {
     const agent = new BotAgent(name, tier, this.deps, {
       onSpawn: (a) => void this.onSpawn(a),
@@ -114,9 +121,15 @@ export class LifecycleManager {
     const ready = this.config.population.autoWhitelist
       ? this.bridge.whitelistAdd(name).catch((e: unknown) => log('warn', 'life', `whitelist add ${name} failed: ${String(e)}`))
       : Promise.resolve();
-    void ready.then(() => {
-      if (!this.stopping && this.agents.get(name) === agent) agent.start();
-    });
+    // Paper rejects joins from one IP closer than connection-throttle (4s), so stagger them.
+    const now = Date.now();
+    const joinAt = Math.max(now, this.nextJoinAt);
+    this.nextJoinAt = joinAt + JOIN_SPACING_MS;
+    void ready
+      .then(() => new Promise((r) => setTimeout(r, joinAt - now)))
+      .then(() => {
+        if (!this.stopping && this.agents.get(name) === agent) agent.start();
+      });
   }
 
   private async onSpawn(agent: BotAgent): Promise<void> {

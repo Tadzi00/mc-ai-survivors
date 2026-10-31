@@ -19,6 +19,7 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
     private BedIndex index;
     private RealisticSeasonsBridge seasons;
     private SimpleEnclosureChecker builtin;
+    private GracePeriod grace;
 
     @Override
     public void onEnable() {
@@ -27,6 +28,8 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
         index.load();
         builtin = new SimpleEnclosureChecker(getConfig().getInt("room-check.max-volume", 512));
         getServer().getPluginManager().registerEvents(new BedListener(this), this);
+        grace = new GracePeriod(this);
+        getServer().getPluginManager().registerEvents(grace, this);
         PluginCommand cmd = getCommand("survivors");
         if (cmd != null) {
             SurvivorsCommand handler = new SurvivorsCommand(this);
@@ -41,6 +44,10 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (index != null) index.save();
+    }
+
+    public GracePeriod grace() {
+        return grace;
     }
 
     public BedIndex index() {

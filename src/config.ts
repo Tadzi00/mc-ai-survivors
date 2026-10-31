@@ -76,6 +76,7 @@ export const ConfigSchema = z
         spawnAtBed: z.boolean().default(true),
         /** Run `whitelist add <bot>` over RCON before each bot connects. */
         autoWhitelist: z.boolean().default(true),
+        graceOnSeed: z.boolean().default(true),
       })
       .default({}),
     /** Blocks; bots only "hear" chat from players within this distance. */

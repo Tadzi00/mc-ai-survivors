@@ -46,6 +46,11 @@ export class BridgeApi {
     if (isSafeName(bot)) await this.rcon.send(`whitelist add ${bot}`);
   }
 
+  /** Starts the "no hostile mobs" grace period (bridge plugin; default one Minecraft day). */
+  async graceStart(ticks?: number): Promise<void> {
+    await this.rcon.send(ticks === undefined ? 'survivors grace start' : `survivors grace start ${Math.max(0, Math.floor(ticks))}`);
+  }
+
   /** Puts a newborn bot at its bed: spawnpoint + teleport (bots are not op; RCON is). */
   async placeAtBed(bot: string, bed: BedPos): Promise<void> {
     if (!isSafeName(bot)) return;

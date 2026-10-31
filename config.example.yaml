@@ -22,6 +22,7 @@ population:
   namePrefix: Surv_       # bots are Surv_01, Surv_02, ... names are never reused
   spawnAtBed: true        # teleport newborns to their bed + set spawnpoint (via RCON)
   autoWhitelist: true     # "whitelist add <bot>" via RCON before each bot joins (offline mode safety)
+  graceOnSeed: true       # no hostile mobs for one MC day when the first bots spawn (or re-seed after extinction)
 
 # Bots only hear chat from players within this many blocks (intentional, see DESIGN.md).
 chatRange: 32

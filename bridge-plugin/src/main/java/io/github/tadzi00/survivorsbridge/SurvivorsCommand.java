@@ -44,6 +44,7 @@ public final class SurvivorsCommand implements TabExecutor {
                 case "unassign" -> unassign(sender, args);
                 case "scan" -> scan(sender, args);
                 case "check" -> check(sender, args);
+                case "grace" -> grace(sender, args);
                 default -> help(sender);
             }
         } catch (IllegalArgumentException e) {
@@ -58,6 +59,7 @@ public final class SurvivorsCommand implements TabExecutor {
         s.sendMessage("/survivors assign <bot> <x> <y> <z> [world]");
         s.sendMessage("/survivors unassign <bot>");
         s.sendMessage("/survivors scan <radius> [x y z [world]]");
+        s.sendMessage("/survivors grace <start [ticks] [world]|stop [world]|status [world]>");
         s.sendMessage("/survivors check <x> <y> <z> [world]");
     }
 
@@ -161,6 +163,30 @@ public final class SurvivorsCommand implements TabExecutor {
                 .put("total", plugin.index().beds().size()));
     }
 
+    /** No natural hostile mobs for a while (default: one Minecraft day). Raw line: SB|v1|grace|{...}. */
+    private void grace(CommandSender s, String[] a) {
+        String sub = a.length > 1 ? a[1].toLowerCase() : "status";
+        GracePeriod g = plugin.grace();
+        switch (sub) {
+            case "start" -> {
+                long ticks = a.length > 2 ? parseInt(a[2]) : plugin.getConfig().getLong("grace.default-ticks", 24000);
+                World w = world(s, a.length > 3 ? a[3] : null);
+                int removed = g.start(w, ticks);
+                s.sendMessage(PREFIX + "grace|{\"active\":true,\"remainingTicks\":" + g.remainingTicks(w) + ",\"removed\":" + removed + "}");
+            }
+            case "stop" -> {
+                World w = world(s, a.length > 2 ? a[2] : null);
+                g.stop(w);
+                s.sendMessage(PREFIX + "grace|{\"active\":false,\"remainingTicks\":0,\"removed\":0}");
+            }
+            case "status" -> {
+                World w = world(s, a.length > 2 ? a[2] : null);
+                s.sendMessage(PREFIX + "grace|{\"active\":" + g.active(w) + ",\"remainingTicks\":" + g.remainingTicks(w) + ",\"removed\":0}");
+            }
+            default -> throw new IllegalArgumentException("usage: /survivors grace <start [ticks] [world]|stop [world]|status [world]>");
+        }
+    }
+
     private static World world(CommandSender s, String name) {
         if (name != null) {
             World w = Bukkit.getWorld(name);
@@ -183,7 +209,7 @@ public final class SurvivorsCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
         if (a.length == 1) {
             List<String> out = new ArrayList<>();
-            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check")) {
+            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check", "grace")) {
                 if (o.startsWith(a[0].toLowerCase())) out.add(o);
             }
             return out;

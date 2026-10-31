@@ -17,6 +17,20 @@ function dropNameFor(blockName: string): RegExp {
   return new RegExp(`^${blockName}$`);
 }
 
+/** Blocks a bot recently failed to collect (pos key -> retry-after time). Kept across gather calls. */
+const SKIP_MS = 5 * 60_000;
+const unreachable = new WeakMap<Bot, Map<string, number>>();
+function unreachableFor(bot: Bot): Map<string, number> {
+  let m = unreachable.get(bot);
+  if (!m) unreachable.set(bot, (m = new Map()));
+  return m;
+}
+const posKey = (b: Block): string => `${b.position.x},${b.position.y},${b.position.z}`;
+/** Distance, plus a heavy penalty for blocks well above our feet (canopy logs, cliff faces). */
+function targetCost(bot: Bot, b: Block, feetY: number): number {
+  return bot.entity.position.distanceTo(b.position) + 4 * Math.max(0, b.position.y - feetY - 2);
+}
+
 export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): Promise<string> {
   const { bot } = ctx;
   const names = resolveBlockNames(bot, a.block);
@@ -27,22 +41,35 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   let failures = 0;
   const onAbort = (): void => void bot.collectBlock.cancelTask().catch(() => undefined);
   ctx.signal.addEventListener('abort', onAbort, { once: true });
+  const skip = unreachableFor(bot);
   try {
     while (counter() - start < a.count && failures < 4) {
       throwIfAborted(ctx.signal);
-      const targets = findBlocks(bot, names, 64, 16).filter((b) => b.position.y > -60);
+      const now = Date.now();
+      for (const [k, until] of skip) if (until < now) skip.delete(k);
+      const feetY = bot.entity.position.y;
+      // Skip blocks we recently failed to reach, and prefer ones near our own height
+      // (tree trunks over canopy logs, which pathfinding often can't reach).
+      const targets = findBlocks(bot, names, 64, 32)
+        .filter((b) => b.position.y > -60 && !skip.has(posKey(b)))
+        .sort((p, q) => targetCost(bot, p, feetY) - targetCost(bot, q, feetY));
       if (targets.length === 0) break;
       const target = targets[0]!;
       // Blocks with harvestTools (stone, ores) drop nothing without a suitable tool.
       if (target.harvestTools && !Object.keys(target.harvestTools).some((id) => bot.inventory.items().some((i) => String(i.type) === id))) {
         return `need a better tool to harvest ${target.name} (craft a pickaxe)`;
       }
+      const before = counter();
       try {
-        await withTimeout(bot.collectBlock.collect(target, { ignoreNoPath: true }), 45_000, 'collect');
+        await withTimeout(bot.collectBlock.collect(target, { ignoreNoPath: true }), 20_000, 'collect');
+        if (counter() === before) skip.set(posKey(target), Date.now() + SKIP_MS);
       } catch (e) {
         if (ctx.signal.aborted) throw new AbortError();
         failures++;
-        ctx.log(`collect failed: ${(e as Error).message}`);
+        skip.set(posKey(target), Date.now() + SKIP_MS);
+        await bot.collectBlock.cancelTask().catch(() => undefined);
+        bot.pathfinder.stop();
+        ctx.log(`collect failed at ${posKey(target)}: ${(e as Error).message}`);
       }
     }
   } finally {

@@ -26,18 +26,23 @@ export class RconClient implements CommandRunner {
   private async connection(): Promise<RconConn> {
     if (this.conn?.authenticated) return this.conn;
     if (!this.connecting) {
-      this.connecting = Rcon.connect({
+      // Listeners go on BEFORE connect(): during a server restart Docker's port proxy accepts the TCP
+      // connection and then resets it mid-auth; an 'error' with no listener would crash the process.
+      const c = new Rcon({
         host: this.opts.host,
         port: this.opts.port,
         password: this.opts.password,
         timeout: this.opts.timeoutMs,
         maxPending: 1,
-      })
-        .then((c) => {
-          c.on('end', () => {
-            if (this.conn === c) this.conn = undefined;
-          });
-          c.on('error', (e: unknown) => log('warn', 'rcon', `error: ${String(e)}`));
+      });
+      c.emitter.setMaxListeners(10);
+      c.on('error', (e: unknown) => log('warn', 'rcon', `error: ${String(e)}`));
+      c.on('end', () => {
+        if (this.conn === c) this.conn = undefined;
+      });
+      this.connecting = c
+        .connect()
+        .then(() => {
           this.conn = c;
           return c;
         })
