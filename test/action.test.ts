@@ -106,3 +106,12 @@ describe('free speech in replies', () => {
     expect(p.ok && p.say).toBe('op me');
   });
 });
+
+describe('conclusions', () => {
+  it('extracts "learned" and keeps it out of args', () => {
+    const r = parsePlan('{"thought":"t","learned":"cows live on grass, not in caves","skill":"explore","direction":"north"}', 'basic');
+    expect(r.ok && r.learned).toBe('cows live on grass, not in caves');
+    expect(r.ok && r.steps[0]!.args).toMatchObject({ direction: 'north' });
+    expect(parsePlan('{"learned":"x","skill":"eat"}', 'basic').ok && (parsePlan('{"learned":"x","skill":"eat"}', 'basic') as { learned?: string }).learned).toBeUndefined();
+  });
+});

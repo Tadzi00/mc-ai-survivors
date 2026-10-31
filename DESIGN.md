@@ -219,6 +219,14 @@ grow it into a wiki.
 The observation shows the 8 nearest discoveries and the last 8 lessons. `attack` walks to remembered animals
 when none are within 48 blocks.
 
+### 6.4.1 Conclusions (model-made lessons)
+
+Every reply may carry `"learned": "<general conclusion>"` (free, like `say`), saved as a lesson prefixed
+`Conclusion:`. When the same skill+args failed 2+ times in a row, the observation says so and asks the bot
+to think about why and write a conclusion instead of repeating. The observation also states whether the bot
+is OUTDOORS / under cover / UNDERGROUND (sky light at head height), which is what most wrong conclusions
+were missing (e.g. hunting cows in a cave). Conclusions can be wrong; that is part of the experiment.
+
 ### 6.5 Memory (manual)
 
 `state/bots/<name>.json`: goal, notes, known places (home, bed, chest, furnace, crafting_table).

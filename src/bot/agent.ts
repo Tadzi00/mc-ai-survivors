@@ -510,6 +510,18 @@ export class BotAgent {
     return `Forgot ${count} thing(s) about "${needle}".`;
   }
 
+  /** "You failed X 2+ times in a row - why?" so the model draws a conclusion instead of looping. */
+  private repeatedFailureNote(): string | undefined {
+    const last = this.recentResults.slice(-3);
+    if (last.length < 2) return undefined;
+    const key = (r: string): string => r.split(' -> ')[0] ?? r;
+    const tail = last[last.length - 1]!;
+    const same = last.filter((r) => key(r) === key(tail) && looksFailed(r.split(' -> ').slice(1).join(' -> '))).length;
+    if (same < 2) return undefined;
+    return `${key(tail)} failed ${same} times in a row. Stop repeating it. Think WHY (where are you? underground or outside?
+ time of day? tools?) and write your conclusion in "learned", then try something different`;
+  }
+
   /** Attacked by a hostile: shout for help with coordinates (scripted; uses the normal shout cooldown). */
   private maybeCallForHelp(): void {
     const bot = this.bot;
@@ -859,7 +871,7 @@ export class BotAgent {
       heard: this.chat.recent(),
       recentResults: this.recentResults,
       interruptedBy: this.interruptedBy,
-      planNote: this.planNote,
+      planNote: this.planNote ?? this.repeatedFailureNote(),
       shoutCooldown: shoutCooldownLeft(this.name, this.deps.config.shout.cooldownSeconds),
       chatRange: this.deps.config.chatRange,
       silentSeconds: (Date.now() - this.lastSpokeAt) / 1000,
@@ -884,6 +896,10 @@ export class BotAgent {
       });
       if (parsed.ok) {
         this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
+        if (parsed.learned && this.memory.learn(`Conclusion: ${parsed.learned}`)) {
+          this.log('info', `concluded: ${parsed.learned}`);
+          this.jsonl.write('conclusion', { text: parsed.learned });
+        }
         if (parsed.say && this.bot) {
           this.bot.chat(parsed.say);
           this.lastSpokeAt = Date.now();

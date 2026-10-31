@@ -77,6 +77,7 @@ export function buildObservation(o: ObservationInput): string {
   } else if (!o.seasonsEnabled) {
     lines.push('Seasons: not available on this server.');
   }
+  lines.push(`Surroundings: ${surroundings(bot)}.`);
   lines.push(`Goal: ${memory.data.goal ?? '(none)'}`);
   lines.push(`Inventory: ${inventorySummary(bot)}. Holding: ${bot.heldItem?.name ?? 'nothing'}.`);
   lines.push(progressFor(o));
@@ -174,4 +175,14 @@ function progressFor(o: ObservationInput): string {
     spareBedKnown: !!memory.place('spare_bed'),
     warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
   });
+}
+
+/** Underground vs outdoors, from sky light at head height (15 = open sky, ~0 = deep cave). */
+function surroundings(bot: Bot): string {
+  const head = bot.blockAt(bot.entity.position.offset(0, 1.6, 0));
+  const sky = head?.skyLight ?? 15;
+  const y = Math.floor(bot.entity.position.y);
+  if (sky >= 13) return `OUTDOORS under open sky (y=${y})`;
+  if (sky >= 6) return `under cover (trees/roof/overhang), sky partly visible (y=${y})`;
+  return `UNDERGROUND / in a cave or closed room, no daylight (y=${y}). Animals and trees live on the surface`;
 }

@@ -34,6 +34,9 @@ const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survi
 - Add "say" to your reply to talk WITHOUT spending an action: tell nearby bots what you found (with coordinates),
   what you learned (your "Lessons learned"), what you plan, or ask them questions. Answer when someone asks you.
 - Agree who does what (one gets wood, one hunts, one builds). Warn about dangers and deaths.
+- LEARN: when something works or keeps failing, draw a general conclusion and put it in "learned"
+  (e.g. "cows live on grass under open sky, not in caves", "iron ore needs a stone pickaxe"). It is saved
+  forever in your lessons; share good ones with others.
 - Use shout for important far-away news (village spot, danger, found iron). Write signs/books so the
   knowledge survives you.`;
 
@@ -44,10 +47,10 @@ Death is permanent. say reaches 15 blocks; shout reaches 1000 blocks (max 15 wor
 there. Read signs for knowledge.`;
 
 const FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 20 words>","say":"<optional: words to nearby bots>","skill":"<skill name>","args":{...}}`;
+{"thought":"<max 20 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","skill":"<skill name>","args":{...}}`;
 
 const SMART_FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 30 words>","say":"<optional: words to nearby bots>","plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
+{"thought":"<max 30 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
 
 export interface ShoutRules {
   range: number;
