@@ -21,7 +21,7 @@ import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './ac
 import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
 import { enableServerCrafting } from '../skills/impl/resources.js';
 import type { CommandRunner } from '../rcon/rcon.js';
-import { lessonFrom } from './memory.js';
+import { lessonFrom, parseChestReport } from './memory.js';
 import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, ProtectedAreas, Roster } from './chat.js';
@@ -237,6 +237,9 @@ export class BotAgent {
       if (this.chat.offer(this.name, username, message, bot.entity?.position, speakerPos, ranges)) {
         this.jsonl.write('heard', { from: username, text: message });
         this.rememberShout(username, message, speakerPos);
+        // "Stored 15 cobblestone in the chest at x y z" from someone nearby -> update our chest knowledge.
+        const report = parseChestReport(message);
+        if (report) this.memory.adjustChest(report.pos, report.items, report.sign, username);
         this.wakePlanner('chat');
       }
     });
@@ -612,6 +615,7 @@ export class BotAgent {
       lines.push(`${k.replace('_', ' ')} at ${p.x} ${p.y} ${p.z}${p.note ? ` (${p.note})` : ''}`);
     }
     for (const d of (m.data.discoveries ?? []).slice(-12)) student.memory.discover(d.what, d);
+    for (const c of Object.values(m.data.storage ?? {})) student.memory.setChest(c, c.items, this.name);
     const lessons = (m.data.lessons ?? []).filter((l) => !/^DEATH/.test(l)).slice(-8);
     for (const l of lessons) student.memory.learn(`From ${this.name}: ${l.replace(/^Taught by \w+: /, '')}`);
     student.memory.learn(`${this.name} is my mentor; ask them when unsure`);

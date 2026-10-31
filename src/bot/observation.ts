@@ -123,6 +123,15 @@ export function buildObservation(o: ObservationInput): string {
   }
   const places = Object.entries(memory.data.places).map(([k, p]) => `${k} ${fmtPos(p)}${p.note ? ` (${p.note})` : ''}`);
   lines.push(`Known places: ${places.join('; ') || 'none'}.`);
+  const chests = Object.values(memory.data.storage ?? {})
+    .map((c) => ({ c, d: distance(me, c) }))
+    .sort((p, q) => p.d - q.d)
+    .slice(0, 4)
+    .map(({ c, d }) => {
+      const items = Object.entries(c.items).sort((p, q) => q[1] - p[1]).slice(0, 6).map(([n, k]) => `${k} ${n}`).join(', ') || 'empty';
+      return `chest ${c.x},${c.y},${c.z} (${Math.round(d)}m): ${items}${c.by !== 'me' ? ` [per ${c.by}]` : ''}`;
+    });
+  if (chests.length) lines.push(`Storage you know: ${chests.join('; ')}.`);
   const disc = [...(memory.data.discoveries ?? [])]
     .map((d) => ({ d, dist: distance(me, d) }))
     .sort((a, b) => a.dist - b.dist)

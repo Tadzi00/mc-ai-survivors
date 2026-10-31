@@ -239,8 +239,12 @@ were missing (e.g. hunting cows in a cave). Conclusions can be wrong; that is pa
 ### 6.4.2 Mentoring and utilities
 
 - The discovery scan also records crafting tables, furnaces/smokers, chests/barrels and beds.
-- After `chest_store`/`chest_take` the bot says what it stored/took and where (15-block say), so nearby
-  bots and players learn where things are. (Listeners do not yet parse it into their chest memory.)
+- Every chest is remembered separately (`storage` in memory: "x,y,z" -> contents, time, source). Opening a
+  chest records its exact contents. After `chest_store`/`chest_take` the bot says
+  "Stored 15 cobblestone in the chest at x y z" / "Took ..."; bots that hear it adjust their own copy
+  (`parseChestReport`, marked `[per <name>]` in the observation, which shows the 4 nearest known chests).
+  `chest_take` goes to the nearest chest known to hold the item (within 96 blocks) before falling back to
+  the nearest chest; a remembered chest that no longer exists is forgotten. Mentors hand over their storage.
 - A bot born this run gets a mentor 4 s after its first spawn: the nearest living bot (roster distance)
   copies its home (as the newborn's `village`), crafting table/chest/furnace places (with contents), last 12
   discoveries and last 8 lessons ("From <mentor>: ...") into the newborn's memory, and whispers a welcome

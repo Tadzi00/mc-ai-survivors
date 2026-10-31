@@ -17,6 +17,42 @@ export interface MemoryData {
   discoveries?: Discovery[];
   /** Auto-recorded lessons from failures and events ("need a stone pickaxe for iron_ore"). */
   lessons?: string[];
+  /** Known chests: "x,y,z" -> contents as last seen or heard about. */
+  storage?: Record<string, Chest>;
+}
+
+export interface Chest {
+  x: number;
+  y: number;
+  z: number;
+  items: Record<string, number>;
+  /** ISO time of the last update. */
+  at: string;
+  /** Who the information came from ("me" or a bot/player name). */
+  by: string;
+}
+
+export const chestKey = (p: { x: number; y: number; z: number }): string => `${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`;
+
+/** Applies a stored (+) / took (-) report to known contents; never below zero. PURE. */
+export function applyChestDelta(items: Record<string, number>, delta: Record<string, number>, sign: 1 | -1): Record<string, number> {
+  const out = { ...items };
+  for (const [k, v] of Object.entries(delta)) {
+    const n = (out[k] ?? 0) + sign * v;
+    if (n > 0) out[k] = n;
+    else delete out[k];
+  }
+  return out;
+}
+
+/** Parses "Stored 15 cobblestone, 5 bread in the chest at -11 99 -11" / "Took 5 cobblestone from the chest at x y z". PURE. */
+export function parseChestReport(text: string): { sign: 1 | -1; items: Record<string, number>; pos: { x: number; y: number; z: number } } | undefined {
+  const m = /^(stored|took)\s+(.+?)\s+(?:in|from) the chest at (-?\d+) (-?\d+) (-?\d+)/i.exec(text.trim());
+  if (!m) return undefined;
+  const items: Record<string, number> = {};
+  for (const it of m[2]!.matchAll(/(\d+) ([a-z0-9_]+)/g)) items[it[2]!] = (items[it[2]!] ?? 0) + Number(it[1]);
+  if (Object.keys(items).length === 0) return undefined;
+  return { sign: m[1]!.toLowerCase() === 'stored' ? 1 : -1, items, pos: { x: Number(m[3]), y: Number(m[4]), z: Number(m[5]) } };
 }
 
 export interface Discovery {
@@ -116,6 +152,28 @@ export class Memory {
     this.data.lessons = after;
     this.save();
     return true;
+  }
+
+  /** Exact contents seen by opening the chest. */
+  setChest(p: { x: number; y: number; z: number }, items: Record<string, number>, by: string): void {
+    const st = (this.data.storage ??= {});
+    st[chestKey(p)] = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), items, at: new Date().toISOString(), by };
+    this.save();
+  }
+
+  /** Someone said they stored/took items: adjust what we believe is inside. */
+  adjustChest(p: { x: number; y: number; z: number }, delta: Record<string, number>, sign: 1 | -1, by: string): void {
+    const st = (this.data.storage ??= {});
+    const prev = st[chestKey(p)];
+    st[chestKey(p)] = {
+      x: Math.floor(p.x),
+      y: Math.floor(p.y),
+      z: Math.floor(p.z),
+      items: applyChestDelta(prev?.items ?? {}, delta, sign),
+      at: new Date().toISOString(),
+      by,
+    };
+    this.save();
   }
 
   setGoal(goal: string | null): void {

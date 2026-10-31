@@ -17,6 +17,7 @@ function rememberChest(ctx: SkillContext, block: Block, items: Array<{ name: str
   for (const i of items) sum.set(i.name, (sum.get(i.name) ?? 0) + i.count);
   const note = sum.size ? [...sum].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${c} ${n}`).join(', ') : 'empty';
   ctx.memory.setPlace('chest', { ...block.position, note: `contains ${note}` });
+  ctx.memory.setChest(block.position, Object.fromEntries(sum), 'me');
 }
 
 const invCount = (ctx: SkillContext, name: string): number =>
@@ -25,9 +26,25 @@ const invCount = (ctx: SkillContext, name: string): number =>
 const chestCount = (chest: { containerItems(): Array<{ name: string; count: number }> }, name: string): number =>
   chest.containerItems().filter((i) => i.name === name).reduce((n, i) => n + i.count, 0);
 
-async function openNearestChest(ctx: SkillContext): Promise<{ block: Block } | string> {
+async function openNearestChest(ctx: SkillContext, wanted: string[] = []): Promise<{ block: Block } | string> {
   const { bot } = ctx;
-  const block = nearestBlock(bot, ['chest', 'barrel', 'trapped_chest'], 24);
+  let block: Block | undefined;
+  // Taking something: go to the nearest chest we KNOW holds it (within 96 blocks), not just any chest.
+  if (wanted.length) {
+    const me = bot.entity.position;
+    const known = Object.values(ctx.memory.data.storage ?? {})
+      .filter((c) => wanted.some((w) => (c.items[w] ?? 0) > 0))
+      .map((c) => ({ c, d: Math.hypot(c.x - me.x, c.y - me.y, c.z - me.z) }))
+      .filter((x) => x.d <= 96)
+      .sort((p, q) => p.d - q.d)[0];
+    if (known) {
+      if (known.d > 6) await gotoNear(ctx, known.c.x, known.c.y, known.c.z, 2, 60_000).catch(() => undefined);
+      const b = bot.blockAt(bot.entity.position.clone().set(known.c.x, known.c.y, known.c.z));
+      if (b && /chest|barrel/.test(b.name)) block = b;
+      else delete ctx.memory.data.storage![`${known.c.x},${known.c.y},${known.c.z}`]; // gone
+    }
+  }
+  block ??= nearestBlock(bot, ['chest', 'barrel', 'trapped_chest'], 24);
   if (!block) return 'no chest within 24 blocks (craft one: 8 planks)';
   await gotoNear(ctx, block.position.x, block.position.y, block.position.z, 2, 30_000);
   ctx.memory.setPlace('chest', block.position);
@@ -72,7 +89,7 @@ export async function chestStoreSkill(ctx: SkillContext, a: SkillArgsOf<'chest_s
 
 export async function chestTakeSkill(ctx: SkillContext, a: SkillArgsOf<'chest_take'>): Promise<string> {
   const { bot } = ctx;
-  const found = await openNearestChest(ctx);
+  const found = await openNearestChest(ctx, a.items.map((sp) => parseItemSpec(sp).name).filter((n) => n !== 'list' && n !== '?'));
   if (typeof found === 'string') return found;
   const chest = await bot.openContainer(found.block);
   const done: string[] = [];

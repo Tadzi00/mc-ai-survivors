@@ -121,3 +121,21 @@ describe('auto memory', () => {
     expect(lessonFrom('gather', { block: 'log' }, 'gathered 8 log (wanted 8)')).toBeUndefined();
   });
 });
+
+import { applyChestDelta, parseChestReport } from '../src/bot/memory.js';
+
+describe('chest knowledge', () => {
+  it('parses stored/took reports', () => {
+    expect(parseChestReport('Stored 15 cobblestone, 5 bread in the chest at -11 99 -11')).toEqual({
+      sign: 1, items: { cobblestone: 15, bread: 5 }, pos: { x: -11, y: 99, z: -11 },
+    });
+    expect(parseChestReport('Took 5 cobblestone from the chest at 3 64 -2')).toEqual({
+      sign: -1, items: { cobblestone: 5 }, pos: { x: 3, y: 64, z: -2 },
+    });
+    expect(parseChestReport('I like chests')).toBeUndefined();
+  });
+  it('applies deltas without going negative', () => {
+    expect(applyChestDelta({ cobblestone: 10 }, { cobblestone: 15, bread: 2 }, 1)).toEqual({ cobblestone: 25, bread: 2 });
+    expect(applyChestDelta({ cobblestone: 10, bread: 2 }, { cobblestone: 10, bread: 5 }, -1)).toEqual({});
+  });
+});

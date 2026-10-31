@@ -26,7 +26,7 @@ bot.once('spawn', async () => {
   console.log('take ->', await chestTakeSkill(ctx, { items: ['cobblestone:5'] }).catch((e) => 'THREW ' + e.message));
   console.log('after take:', inv());
   console.log('look ->', await chestTakeSkill(ctx, { items: ['list'] }).catch((e) => 'THREW ' + e.message));
-  console.log('memory chest:', JSON.stringify(ctx.memory.place('chest')));
+  console.log('memory storage:', JSON.stringify(ctx.memory.data.storage));
   console.log('SERVER bot cobble:', await rcon.send('clear ChestTest minecraft:cobblestone 0'));
   console.log('SERVER chest:', (await rcon.send('execute at ChestTest run data get block ~1 ~ ~ Items')).slice(0, 300));
   await rcon.send('execute at ChestTest run setblock ~1 ~ ~ minecraft:air');
