@@ -45,6 +45,11 @@ export async function exploreSkill(ctx: SkillContext, a: SkillArgsOf<'explore'>)
 
 export async function followSkill(ctx: SkillContext, a: SkillArgsOf<'follow'>): Promise<string> {
   const { bot } = ctx;
+  // Bots following bots did nothing useful (one bot spent most of its time walking behind the other).
+  // Following humans is fine (e.g. "follow me").
+  if (a.player.startsWith(ctx.config.population.namePrefix)) {
+    return `following another bot wastes time: split the work and do a DIFFERENT task than ${a.player} (e.g. they gather wood, you hunt or mine stone). Use say to agree who does what`;
+  }
   const target = bot.players[a.player]?.entity;
   if (!target) return `${a.player} is not visible nearby`;
   bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true);

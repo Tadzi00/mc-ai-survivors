@@ -71,7 +71,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   smelt: 'smelt {item,count,fuel?} in a furnace, item = input or product (raw_iron or iron_ingot)',
   goto: 'goto {x,y,z} or {place} (a remembered place name like "home", "bed", "chest")',
   explore: 'explore {direction?,distance?} walk into unknown terrain',
-  follow: 'follow {player,seconds}',
+  follow: 'follow {player,seconds} follow a HUMAN player (not other bots)',
   attack: 'attack {target} mob type (e.g. "zombie", "cow") or player name',
   eat: 'eat {} eat best food in inventory',
   sleep: 'sleep {} sleep in own/nearby bed (by day: just claims the bed & sets spawn)',

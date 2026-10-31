@@ -423,6 +423,8 @@ are not logged (size); the hash lets you spot repeated identical situations.
   note "contains ..." shown in the observation; `chest_take {items:["list"]}` just looks inside.
   `scripts/chest-test.mjs` is a live smoke test.
 - `sleep` walks to a standable spot next to the bed (either half) instead of at the bed block itself.
+- `follow` refuses other bots ("split the work instead"); only humans can be followed. A bot used to spend
+  most of its time walking behind its teammate.
 - Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
