@@ -401,6 +401,16 @@ face forward); door transit used the pathfinder through the open door, which tog
 straight); smelt counted window results (now: inventory change, leftovers reported); goto said "arrived"
 when it stopped short (now: reports the distance).
 
+### 12.2 Agent harness
+
+`node scripts/agent-harness.mjs [scenario...]` runs full `BotAgent`s (reflexes, shouts, orders) with a stub
+model that always answers "wait", on a lit platform (light blocks stop night spawns), and stops a test bot
+when it dies (respawned test bots would wander the real world). Scenarios: fight (kills a husk), starving
+(hunt reflex), rescue (assist reflex), checkin (are-you-alive round trip), order ("build shelter" via /tell
+→ sealed room). Real bots ignore chat and deaths of players named `Test*`.
+Findings: alive answers waited for the 3 s tick (now immediate); far shouts with unknown speaker position
+were assumed in range (now the coordinates in the shout give the distance).
+
 ## 13. Not bugs
 
 - A bot that dies **never comes back**, and its name is never reused.

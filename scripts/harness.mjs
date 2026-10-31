@@ -30,6 +30,8 @@ async function platform() {
   await cmd(`fill ${X - R} ${Y} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
   await cmd(`fill ${X - R} ${Y - 3} ${Z - R} ${X + R} ${Y - 3} ${Z + R} minecraft:bedrock`);
   await cmd(`fill ${X - R} ${Y - 2} ${Z - R} ${X + R} ${Y - 1} ${Z + R} minecraft:stone`);
+  // light ceiling: no natural mob spawns on the test platform even at night
+  await cmd(`fill ${X - R} ${Y + 7} ${Z - R} ${X + R} ${Y + 7} ${Z + R} minecraft:light[level=15]`);
   await cmd(`kill @e[type=!player,x=${X - R},y=${Y - 2},z=${Z - R},dx=${2 * R},dy=12,dz=${2 * R}]`);
 }
 

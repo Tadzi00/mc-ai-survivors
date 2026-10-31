@@ -228,7 +228,16 @@ export class BotAgent {
       this.timers.push(setInterval(() => void this.reflexTick(), this.deps.config.bot.reflexIntervalMs));
       this.timers.push(setInterval(() => this.idleWatchdog(), 10_000));
       this.timers.push(setInterval(() => this.scanDiscoveries(), 15_000));
-      this.timers.push(setInterval(() => this.helpCheckTick(), 3_000));
+      this.timers.push(
+        setInterval(() => {
+          try {
+            this.helpCheckTick();
+          } catch (e) {
+            this.log('warn', `helpCheckTick: ${(e as Error).message}`);
+            this.jsonl.write('error', { where: 'helpCheckTick', error: (e as Error).message });
+          }
+        }, 3_000),
+      );
       this.timers.push(setInterval(() => void this.equipBestArmor(), 10_000));
       bot.on('playerCollect', (collector) => {
         if (collector === bot.entity) setTimeout(() => void this.equipBestArmor(), 500);
@@ -241,7 +250,14 @@ export class BotAgent {
     });
 
     bot.on('chat', (username, message) => {
-      const speakerPos = bot.players[username]?.entity?.position ?? this.deps.roster.get(username);
+      if (/^Test/.test(username) && !/^Test/.test(this.name)) return; // ignore harness bots
+      // Unknown speaker position: a shout with coordinates in it ("HELP! ... at x y z") tells us where it is,
+      // so far-away shouts are dropped by distance instead of being assumed in range.
+      const coords = /(-?\d{1,7})[ ,]+(-?\d{1,4})[ ,]+(-?\d{1,7})/.exec(message);
+      const speakerPos =
+        bot.players[username]?.entity?.position ??
+        this.deps.roster.get(username) ??
+        (message.startsWith('[SHOUT]') && coords ? { x: Number(coords[1]), y: Number(coords[2]), z: Number(coords[3]) } : undefined);
       const ranges = { say: this.deps.config.chatRange, shout: this.deps.config.shout.range };
       if (this.chat.offer(this.name, username, message, bot.entity?.position, speakerPos, ranges)) {
         this.jsonl.write('heard', { from: username, text: message });
@@ -249,6 +265,7 @@ export class BotAgent {
         // "Surv_03, are you alive?" in normal chat -> answer in normal chat.
         if (!message.startsWith('[SHOUT]') && new RegExp(`\\b${this.name}\\b`, 'i').test(message) && /alive\?|where are you|are you ok/i.test(message)) {
           this.pendingAliveReply = { to: username, until: Date.now() + 30_000, via: 'say' };
+          this.helpCheckTick();
         }
         // "Stored 15 cobblestone in the chest at x y z" from someone nearby -> update our chest knowledge.
         const report = parseChestReport(message);
@@ -372,6 +389,7 @@ export class BotAgent {
   private noteDeathOfOther(msg: string): void {
     const m = /^(\w{3,16}) (was |died|drowned|fell|burned|froze|hit the ground|tried to swim|walked into|starved|suffocated|blew up|withered)/.exec(msg);
     if (!m || m[1] === this.name) return;
+    if (/^Test/.test(m[1]!) && !/^Test/.test(this.name)) return; // harness bots (scripts/*harness.mjs) are not part of the world
     this.forgetAbout(m[1]!, false);
     const where = this.deps.roster.get(m[1]!, 120_000);
     const text = `${msg}${where ? ` near ${Math.floor(where.x)},${Math.floor(where.y)},${Math.floor(where.z)}` : ''}`;
@@ -389,6 +407,8 @@ export class BotAgent {
     // Someone asks whether WE are alive -> answer (scripted, so it happens even mid-task).
     if (new RegExp(`\\b${this.name}\\b`, 'i').test(text) && /alive\?|where are you|are you ok/i.test(text) && !/^\S+: alive at/i.test(text)) {
       this.pendingAliveReply = { to: from, until: Date.now() + 70_000, via: 'shout' };
+      this.jsonl.write('alive_asked', { from });
+      this.helpCheckTick(); // answer right away; the 3 s timer only retries
       return;
     }
     // The bot we're helping answered our check-in.
