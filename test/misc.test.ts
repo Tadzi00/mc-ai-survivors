@@ -79,3 +79,32 @@ describe('config', () => {
     expect(() => parseConfig('providers: {a: {type: ollama}}\ntiers: {smart: {provider: b, model: m}, basic: {provider: a, model: m}}', {})).toThrow(/unknown provider/);
   });
 });
+
+import { addDiscovery, addLesson, lessonFrom } from '../src/bot/memory.js';
+
+describe('auto memory', () => {
+  const d = (what: string, x: number) => ({ what, x, y: 60, z: 0, at: 't' });
+  it('merges nearby discoveries of the same kind and caps the list', () => {
+    let l = addDiscovery([], d('iron_ore', 0));
+    l = addDiscovery(l, d('iron_ore', 10));
+    expect(l).toHaveLength(1);
+    l = addDiscovery(l, d('iron_ore', 100));
+    l = addDiscovery(l, d('coal_ore', 5));
+    expect(l.map((x) => x.what)).toEqual(['iron_ore', 'iron_ore', 'coal_ore']);
+    let big: ReturnType<typeof addDiscovery> = [];
+    for (let i = 0; i < 50; i++) big = addDiscovery(big, d('x', i * 100));
+    expect(big).toHaveLength(40);
+  });
+  it('dedups lessons', () => {
+    let l = addLesson([], 'gather iron_ore: need a better tool to harvest iron_ore (craft a pickaxe)');
+    l = addLesson(l, 'gather iron_ore: need a better tool to harvest iron_ore (craft a stone pickaxe)');
+    expect(l).toHaveLength(1);
+  });
+  it('turns failures into lessons, skips situational ones', () => {
+    expect(lessonFrom('gather', { block: 'iron_ore' }, 'need a better tool to harvest iron_ore (craft a pickaxe)')).toBe(
+      'gather iron_ore: need a better tool to harvest iron_ore (craft a pickaxe)',
+    );
+    expect(lessonFrom('attack', { target: 'cow' }, 'no cow within 24 blocks')).toBeUndefined();
+    expect(lessonFrom('gather', { block: 'log' }, 'gathered 8 log (wanted 8)')).toBeUndefined();
+  });
+});

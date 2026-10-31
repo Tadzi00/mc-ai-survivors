@@ -99,8 +99,7 @@ export async function ensureCraftingTable(ctx: SkillContext): Promise<Block | un
       tableProblem.set(bot, 'no crafting table and not enough planks to make one (4 planks)');
       return undefined;
     }
-    await bot.craft(r, 1, undefined);
-    await clearCraftingGrid(bot);
+    await craftClean(bot, r, 1, undefined);
     await sleep(300);
   }
   const item = findItem(bot, 'crafting_table');
@@ -129,7 +128,7 @@ async function craftPlanksFromLogs(bot: Bot, times: number): Promise<boolean> {
   if (!plank) return false;
   const r = bot.recipesFor(plank.id, null, 1, null)[0];
   if (!r) return false;
-  await bot.craft(r, Math.min(times, log.count), undefined);
+  await craftClean(bot, r, Math.min(times, log.count), undefined);
   return true;
 }
 
@@ -139,7 +138,7 @@ async function autoIntermediates(ctx: SkillContext, itemName: string): Promise<v
   if (countItem(bot, /_planks$/) < 8) await craftPlanksFromLogs(bot, 2).catch(() => false);
   if (/stick|pickaxe|axe|shovel|hoe|sword|torch|sign/.test(itemName) && countItem(bot, 'stick') < 4) {
     const r = bot.recipesFor(bot.registry.itemsByName.stick!.id, null, 1, null)[0];
-    if (r) await bot.craft(r, 1, undefined).catch(() => undefined);
+    if (r) await craftClean(bot, r, 1, undefined).catch(() => undefined);
   }
 }
 
@@ -158,6 +157,16 @@ async function clearCraftingGrid(bot: Bot): Promise<void> {
   }
 }
 
+/** Every craft goes through here: grid emptied before and after, so leftovers can't become buttons/tables. */
+async function craftClean(bot: Bot, recipe: Recipe, times: number, table: Block | null | undefined): Promise<void> {
+  await clearCraftingGrid(bot);
+  try {
+    await bot.craft(recipe, times, table ?? undefined);
+  } finally {
+    await clearCraftingGrid(bot);
+  }
+}
+
 /**
  * bot.craft right after another craft often fails with "missing ingredient" because the client inventory
  * hasn't caught up with the server yet. Wait a bit, re-pick the recipe and retry.
@@ -167,11 +176,9 @@ async function craftWithRetry(ctx: SkillContext, itemId: number, first: Recipe, 
   let recipe = first;
   for (let i = 0; ; i++) {
     try {
-      await bot.craft(recipe, times, table);
-      await clearCraftingGrid(bot);
+      await craftClean(bot, recipe, times, table);
       return;
     } catch (e) {
-      await clearCraftingGrid(bot);
       if (i >= 2 || !/missing ingredient/i.test((e as Error).message)) throw e;
       throwIfAborted(ctx.signal);
       await sleep(500 * (i + 1));

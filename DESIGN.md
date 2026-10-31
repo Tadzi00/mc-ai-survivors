@@ -161,6 +161,20 @@ current position (`bed` and `spare_bed` are reserved), and shouts carry the shou
 smart prompt asks the tribe to pick ONE village spot, `mark_place "village"`, shout it, and build all
 shelters and beds there; basic bots are told to go to a shouted village.
 
+### 6.1.2 Talking is cheap on purpose
+
+Every reply (both tiers) may carry an optional `"say"` field that is spoken immediately and costs **no
+action**. The observation lists teammates within say range and nudges ("you haven't talked for N min";
+"tell them what you found or learned"). The prompt tells bots they start knowing almost nothing and survive by
+sharing. **Why:** the user wants knowledge to spread through conversation, not through code.
+
+### 6.1.3 Help shouts (scripted)
+
+When a bot loses health and a hostile is within 6 blocks, it automatically shouts
+`HELP! <mob> attacking me at x y z` (uses the normal shout cooldown, so at most once a minute). Listeners
+get a `!! X NEEDS HELP at ... (distance, direction)` line with a ready `goto` call for 90 s; going to help
+is the model's choice.
+
 ### 6.2 Signs and books
 
 Signs (`write_sign`, `read_signs`) and written books (`write_book`, `read_book`, chests, lecterns) are
@@ -168,7 +182,26 @@ the lasting, location-bound information channels — how a smart bot teaches a b
 not yet born. Sign text is read from block-entity data (`getSignText()`, front + back, 1.20+). Book pages
 come from 1.20.5+ item components (`written_book_content`/`writable_book_content`) with legacy NBT fallback.
 
-### 6.3 Memory
+### 6.3 Cheat sheet (deliberately minimal)
+
+Both prompts contain a ~8-line "Minecraft basics" sheet (`CHEAT_SHEET` in `src/bot/prompts.ts`): logs → planks
+→ sticks, tool tiers, raw ores must be smelted, torch = coal + stick, cook meat, night/mob basics, falls.
+Nothing more on purpose: the user wants bots to learn the rest from experience and from each other. Don't
+grow it into a wiki.
+
+### 6.4 Auto memory (no model involvement)
+
+`state/bots/<name>.json` additionally holds:
+- `discoveries`: every 15 s the bot records the nearest coal/iron/copper/gold/diamond ore, water, lava,
+  sand, clay, sugar cane and animals (cows, pigs, sheep, chickens, rabbits) within 32 blocks; same kind
+  within 24 blocks of a known entry is merged; max 40. Shouted coordinates are stored too, and a shout
+  mentioning village/base/meet sets the `village` place if none is known.
+- `lessons`: failed skill results that teach something general ("gather iron_ore: need a better tool…"),
+  deaths of others from the global death messages (with position from the roster); deduplicated, max 15.
+The observation shows the 8 nearest discoveries and the last 8 lessons. `attack` walks to remembered animals
+when none are within 48 blocks.
+
+### 6.5 Memory (manual)
 
 `state/bots/<name>.json`: goal, notes, known places (home, bed, chest, furnace, crafting_table).
 Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merged into one
@@ -275,4 +308,10 @@ are not logged (size); the hash lets you spot repeated identical situations.
 - The NEXT STEP hint is sometimes not the smartest move (e.g. asks for a sword before food). It is a fixed
   ladder on purpose; smart bots may deviate.
 - `craft crafting_table` is refused when the bot already has one (it used to pile up tables).
-- After every craft the 2x2 crafting grid is emptied: leftover planks there silently became crafting tables.
+- After every craft the 2x2 crafting grid is emptied (`craftClean`): leftover planks there silently became
+  crafting tables (4 planks) or buttons (1 plank).
+- `build_shelter` digs out leaves/panes/fences/snow/ice in its outline and replaces them with real blocks.
+  The door is crafted before building and placed on the floor block's top face. If that fails the doorway
+  is walled up (room stays sealed) and remembered as place `doorway`; `add_door` fixes it later.
+- Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
+  `exclusionAreasBreak`), so they don't tunnel out of their own shelter.

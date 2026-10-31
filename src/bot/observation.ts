@@ -2,7 +2,7 @@ import type { Bot } from 'mineflayer';
 import type { SeasonsReading } from '../contracts.js';
 import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS } from '../skills/helpers.js';
-import { formatHeard, type HeardMessage } from './chat.js';
+import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
 import type { Memory } from './memory.js';
 import { progressText } from './progress.js';
 
@@ -21,6 +21,10 @@ export interface ObservationInput {
   planNote?: string;
   /** Seconds until this bot may shout again. */
   shoutCooldown?: number;
+  /** say range, for the "who can hear you" line. */
+  chatRange?: number;
+  /** Seconds since this bot last said/shouted anything. */
+  silentSeconds?: number;
 }
 
 const CATEGORIES: Array<[string, (n: string) => boolean]> = [
@@ -107,6 +111,37 @@ export function buildObservation(o: ObservationInput): string {
   }
   const places = Object.entries(memory.data.places).map(([k, p]) => `${k} ${fmtPos(p)}`);
   lines.push(`Known places: ${places.join('; ') || 'none'}.`);
+  const disc = [...(memory.data.discoveries ?? [])]
+    .map((d) => ({ d, dist: distance(me, d) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 8)
+    .map(({ d, dist }) => `${d.what} ${d.x},${d.y},${d.z} (${Math.round(dist)}m ${compass(me, d)})`);
+  if (disc.length) lines.push(`Found earlier: ${disc.join('; ')}.`);
+  const lessons = (memory.data.lessons ?? []).slice(-8);
+  if (lessons.length) {
+    lines.push('Lessons learned (share them!):');
+    for (const l of lessons) lines.push(`  - ${l}`);
+  }
+
+  // Social: teammates in earshot, calls for help.
+  const range = o.chatRange ?? 15;
+  const near = Object.values(bot.players)
+    .filter((p) => p.username !== o.name && p.entity?.position && p.entity.position.distanceTo(me) <= range)
+    .map((p) => `${p.username} ${Math.round(p.entity!.position.distanceTo(me))}m`);
+  if (near.length) {
+    const quiet = o.silentSeconds !== undefined && o.silentSeconds > 90 ? ` You haven't talked for ${Math.round(o.silentSeconds / 60)} min.` : '';
+    lines.push(`In talking range (say): ${near.join(', ')}.${quiet} Tell them what you found or learned, ask what they know, agree who does what.`);
+  }
+  const help = o.heard.filter((h) => h.kind === 'shout' && /help/i.test(h.text) && Date.now() - h.at < 90_000).at(-1);
+  if (help) {
+    const c = /(-?\d+) (-?\d+) (-?\d+)/.exec(help.text);
+    const at = c ? { x: Number(c[1]), y: Number(c[2]), z: Number(c[3]) } : help.pos;
+    if (at) {
+      lines.push(
+        `!! ${help.from} NEEDS HELP at ${at.x},${at.y},${at.z} (${Math.round(distance(me, at))}m ${compass(me, at)}). If you are armed and healthy: {"skill":"goto","args":{"x":${at.x},"y":${at.y},"z":${at.z}}}`,
+      );
+    }
+  }
   if (memory.data.notes.length) {
     lines.push('Your notes:');
     for (const n of memory.data.notes.slice(-12)) lines.push(`  - ${n}`);

@@ -13,6 +13,46 @@ export interface MemoryData {
   goal: string | null;
   notes: string[];
   places: Record<string, Place>;
+  /** Auto-recorded finds: ores, water, animals, dangers, shouted spots. */
+  discoveries?: Discovery[];
+  /** Auto-recorded lessons from failures and events ("need a stone pickaxe for iron_ore"). */
+  lessons?: string[];
+}
+
+export interface Discovery {
+  what: string;
+  x: number;
+  y: number;
+  z: number;
+  at: string;
+}
+
+/**
+ * Adds a discovery unless the same kind is already known within `mergeDist` blocks (keeps the list
+ * meaningful: "iron here", not every single ore block). Oldest entries drop out past `cap`. PURE.
+ */
+export function addDiscovery(list: Discovery[], d: Discovery, mergeDist = 24, cap = 40): Discovery[] {
+  if (list.some((o) => o.what === d.what && Math.hypot(o.x - d.x, o.y - d.y, o.z - d.z) <= mergeDist)) return list;
+  const out = [...list, d];
+  return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+/** Adds a lesson unless an equivalent one (same first 50 chars, case-insensitive) exists. PURE. */
+export function addLesson(list: string[], lesson: string, cap = 15): string[] {
+  const l = lesson.trim().slice(0, 160);
+  const key = l.toLowerCase().slice(0, 50);
+  if (!l || list.some((o) => o.toLowerCase().slice(0, 50) === key)) return list;
+  const out = [...list, l];
+  return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+/** Turns a failed skill result into a reusable lesson, or undefined if it's not worth keeping. PURE. */
+export function lessonFrom(skill: string, args: Record<string, unknown>, result: string): string | undefined {
+  const r = result.trim();
+  if (!/^(cannot|could not|need|not enough|too |no known recipe|unknown item|you already)/i.test(r)) return undefined;
+  if (/within \d+ blocks|cooldown|interrupted|timed out|try again/i.test(r)) return undefined; // situational
+  const what = typeof args.item === 'string' ? args.item : typeof args.block === 'string' ? args.block : '';
+  return `${skill}${what ? ` ${what}` : ''}: ${r}`;
 }
 
 /**
@@ -58,6 +98,24 @@ export class Memory {
 
   place(name: string): Place | undefined {
     return this.data.places[name.toLowerCase()];
+  }
+
+  discover(what: string, p: { x: number; y: number; z: number }): boolean {
+    const before = this.data.discoveries ?? [];
+    const after = addDiscovery(before, { what, x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), at: new Date().toISOString() });
+    if (after === before) return false;
+    this.data.discoveries = after;
+    this.save();
+    return true;
+  }
+
+  learn(lesson: string): boolean {
+    const before = this.data.lessons ?? [];
+    const after = addLesson(before, lesson);
+    if (after === before) return false;
+    this.data.lessons = after;
+    this.save();
+    return true;
   }
 
   setGoal(goal: string | null): void {

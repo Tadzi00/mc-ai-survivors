@@ -1,4 +1,5 @@
 import type { Item } from 'prismarine-item';
+import type { Bot } from 'mineflayer';
 import { sleep } from '../../util/time.js';
 import { readBookItem, wrapSignText, type BookLike } from '../bookText.js';
 import type { SkillArgsOf } from '../schemas.js';
@@ -37,15 +38,24 @@ export function shoutCooldownLeft(name: string, cooldownSeconds: number, now = D
   return Math.max(0, Math.ceil(cooldownSeconds - (now - last) / 1000));
 }
 
-export async function shoutSkill(ctx: SkillContext, a: SkillArgsOf<'shout'>): Promise<string> {
-  const { maxWords, cooldownSeconds } = ctx.config.shout;
-  const text = a.text.replace(/^\//, '').replace(/\s+/g, ' ').trim();
+/**
+ * Sends a shout if allowed (word limit + per-bot cooldown). Used by the shout skill and by the automatic
+ * help call when a bot is attacked. Returns undefined on success, or the reason it was refused.
+ */
+export function tryShout(bot: Bot, name: string, rawText: string, cfg: { maxWords: number; cooldownSeconds: number }): string | undefined {
+  const text = rawText.replace(/^\//, '').replace(/\s+/g, ' ').trim();
   const words = wordCount(text);
-  if (words > maxWords) return `too long: ${words} words, a shout may have at most ${maxWords}. Shorten it.`;
-  const wait = shoutCooldownLeft(ctx.name, cooldownSeconds);
+  if (words > cfg.maxWords) return `too long: ${words} words, a shout may have at most ${cfg.maxWords}. Shorten it.`;
+  const wait = shoutCooldownLeft(name, cfg.cooldownSeconds);
   if (wait > 0) return `shout on cooldown, ${wait}s left (use say for nearby players)`;
-  lastShout.set(ctx.name, Date.now());
-  ctx.bot.chat(`${SHOUT_PREFIX}${text}`.slice(0, 250));
+  lastShout.set(name, Date.now());
+  bot.chat(`${SHOUT_PREFIX}${text}`.slice(0, 250));
+  return undefined;
+}
+
+export async function shoutSkill(ctx: SkillContext, a: SkillArgsOf<'shout'>): Promise<string> {
+  const refused = tryShout(ctx.bot, ctx.name, a.text, ctx.config.shout);
+  if (refused) return refused;
   return `shouted (heard up to ${ctx.config.shout.range} blocks; listeners see you at ${fmtPos(ctx.bot.entity.position)})`;
 }
 

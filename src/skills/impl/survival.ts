@@ -24,8 +24,23 @@ export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): 
 
 export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): Promise<string> {
   const { bot } = ctx;
-  const e = nearestEntity(ctx, a.target);
-  if (!e) return `no ${a.target} within 24 blocks`;
+  // "cows" -> "cow" (only for real mob names, so player names ending in s stay intact)
+  const singular = a.target.toLowerCase().replace(/s$/, '');
+  const target = !bot.registry.entitiesByName[a.target.toLowerCase()] && bot.registry.entitiesByName[singular] ? singular : a.target;
+  let e = nearestEntity(ctx, target, 48);
+  if (!e) {
+    // Go where this animal was seen before (auto-memory), then look again.
+    const me = bot.entity.position;
+    const seen = (ctx.memory.data.discoveries ?? [])
+      .filter((d) => d.what === `${target.toLowerCase()}s`)
+      .map((d) => ({ d, dist: Math.hypot(d.x - me.x, d.z - me.z) }))
+      .filter((x) => x.dist <= 160)
+      .sort((p, q) => p.dist - q.dist)[0];
+    if (!seen) return `no ${target} within 48 blocks and none remembered; explore to find some`;
+    await gotoNear(ctx, seen.d.x, seen.d.y, seen.d.z, 4, 60_000).catch(() => undefined);
+    e = nearestEntity(ctx, target, 32);
+    if (!e) return `went to where ${target}s were seen (${seen.d.x},${seen.d.y},${seen.d.z}) but they are gone; explore`;
+  }
   const sword = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ?? bot.inventory.items().find((i) => i.name.endsWith('_axe'));
   if (sword) await bot.equip(sword, 'hand').catch(() => undefined);
   void bot.pvp.attack(e);

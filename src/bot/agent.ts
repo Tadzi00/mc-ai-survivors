@@ -11,14 +11,16 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
+import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { placeTorchSkill } from '../skills/impl/building.js';
 import { JsonlLog, log, shortHash } from '../util/log.js';
 import { AbortError, sleep, TimeoutError } from '../util/time.js';
 import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './action.js';
-import { shoutCooldownLeft } from '../skills/impl/knowledge.js';
+import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
+import { lessonFrom } from './memory.js';
+import { classifyChat } from './chat.js';
 import { ChatLog, Roster } from './chat.js';
 import { Memory } from './memory.js';
 import { buildObservation } from './observation.js';
@@ -43,6 +45,21 @@ export interface AgentEvents {
 
 /** Entity metadata index 0 is a bit field; bit 0x01 = on fire. */
 const isOnFire = (flags: unknown): boolean => typeof flags === 'number' && (flags & 0x01) === 1;
+
+/** What the discovery scan looks for (label, block-name predicate). */
+const DISCOVERY_BLOCKS: Array<[string, (n: string) => boolean]> = [
+  ['coal_ore', (n) => n === 'coal_ore' || n === 'deepslate_coal_ore'],
+  ['iron_ore', (n) => n === 'iron_ore' || n === 'deepslate_iron_ore'],
+  ['copper_ore', (n) => n === 'copper_ore' || n === 'deepslate_copper_ore'],
+  ['gold_ore', (n) => n === 'gold_ore' || n === 'deepslate_gold_ore'],
+  ['diamond_ore', (n) => n === 'diamond_ore' || n === 'deepslate_diamond_ore'],
+  ['water', (n) => n === 'water'],
+  ['lava (danger)', (n) => n === 'lava'],
+  ['sand', (n) => n === 'sand'],
+  ['clay', (n) => n === 'clay'],
+  ['sugar_cane', (n) => n === 'sugar_cane'],
+];
+const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit']);
 
 /** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
@@ -72,6 +89,7 @@ export class BotAgent {
   /** Remaining steps of the current multi-step plan (smart bots). Cleared when something changes. */
   private planQueue: PlannedAction[] = [];
   private planNote: string | undefined;
+  private lastSpokeAt = Date.now();
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -131,6 +149,15 @@ export class BotAgent {
       moves.canDig = true;
       moves.allowParkour = false; // fewer fatal falls
       moves.allowSprinting = true;
+      // Use doors instead of digging through walls (Paper handles door opening fine).
+      moves.canOpenDoors = true;
+      // Never dig through our own (or a known) shelter: breaking blocks near home costs a fortune.
+      moves.exclusionAreasBreak.push((block: { position: { x: number; y: number; z: number } }) => {
+        const home = this.memory.place('home');
+        if (!home) return 0;
+        const p = block.position;
+        return Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4 ? 1000 : 0;
+      });
       bot.pathfinder.setMovements(moves);
       this.running = true;
       this.lastHealth = bot.health;
@@ -139,6 +166,7 @@ export class BotAgent {
       this.events.onSpawn(this);
       this.timers.push(setInterval(() => void this.reflexTick(), this.deps.config.bot.reflexIntervalMs));
       this.timers.push(setInterval(() => this.idleWatchdog(), 10_000));
+      this.timers.push(setInterval(() => this.scanDiscoveries(), 15_000));
       this.timers.push(setInterval(() => void this.unstickTick(), 1_000));
       this.timers.push(setInterval(() => void this.temperatureTick(), this.deps.config.bot.temperatureCheckSeconds * 1000));
       void this.temperatureTick();
@@ -150,6 +178,7 @@ export class BotAgent {
       const ranges = { say: this.deps.config.chatRange, shout: this.deps.config.shout.range };
       if (this.chat.offer(this.name, username, message, bot.entity?.position, speakerPos, ranges)) {
         this.jsonl.write('heard', { from: username, text: message });
+        this.rememberShout(username, message, speakerPos);
         this.wakePlanner('chat');
       }
     });
@@ -157,10 +186,14 @@ export class BotAgent {
       if (position === 'system' || position === 'game_info') {
         this.recentSystemMsgs.push({ at: Date.now(), text: msg });
         this.recentSystemMsgs = this.recentSystemMsgs.filter((m) => Date.now() - m.at < 10_000);
+        this.noteDeathOfOther(msg);
       }
     });
     bot.on('health', () => {
-      if (bot.health < this.lastHealth - 0.5) this.wakePlanner('hurt');
+      if (bot.health < this.lastHealth - 0.5) {
+        this.wakePlanner('hurt');
+        this.maybeCallForHelp();
+      }
       this.lastHealth = bot.health;
     });
     bot.on('death', () => void this.handleDeath());
@@ -241,6 +274,61 @@ export class BotAgent {
   }
 
   // ---------------------------------------------------------------- reflexes
+  // ---------------------------------------------------------------- auto memory & social
+
+  /** Every 15 s: remember notable resources, dangers and animals within 32 blocks (no model involved). */
+  private scanDiscoveries(): void {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity) return;
+    const all = Object.keys(bot.registry.blocksByName);
+    for (const [what, pred] of DISCOVERY_BLOCKS) {
+      const b = findBlocks(bot, all.filter(pred), 32, 1)[0];
+      if (b && this.memory.discover(what, b.position)) this.jsonl.write('discovery', { what, pos: b.position });
+    }
+    for (const e of Object.values(bot.entities)) {
+      if (!e.name || !ANIMALS.has(e.name) || !e.position || e.position.distanceTo(bot.entity.position) > 32) continue;
+      if (this.memory.discover(`${e.name}s`, e.position)) this.jsonl.write('discovery', { what: e.name, pos: e.position });
+    }
+  }
+
+  /** Server death messages are global: learn who died, how, and (if known) where. */
+  private noteDeathOfOther(msg: string): void {
+    const m = /^(\w{3,16}) (was |died|drowned|fell|burned|froze|hit the ground|tried to swim|walked into|starved|suffocated|blew up|withered)/.exec(msg);
+    if (!m || m[1] === this.name) return;
+    const where = this.deps.roster.get(m[1]!, 120_000);
+    const text = `${msg}${where ? ` near ${Math.floor(where.x)},${Math.floor(where.y)},${Math.floor(where.z)}` : ''}`;
+    this.memory.learn(`DEATH: ${text}`);
+    if (where) this.memory.discover(`danger (${msg.slice(m[1]!.length + 1, m[1]!.length + 30)})`, where);
+  }
+
+  /** Shouts with coordinates become discoveries; a shouted village becomes the "village" place. */
+  private rememberShout(from: string, raw: string, speakerPos: { x: number; y: number; z: number } | undefined): void {
+    const { kind, text } = classifyChat(raw);
+    if (kind !== 'shout') return;
+    const c = /(-?\d{1,6})[ ,]+(-?\d{1,4})[ ,]+(-?\d{1,6})/.exec(text);
+    const pos = c ? { x: Number(c[1]), y: Number(c[2]), z: Number(c[3]) } : speakerPos;
+    if (!pos) return;
+    if (/village|town|base|meet/i.test(text) && !this.memory.place('village')) {
+      this.memory.setPlace('village', { ...pos, note: `shouted by ${from}` });
+      this.memory.learn(`${from} shouted the village location: ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`);
+    } else if (!/help|attack/i.test(text)) {
+      this.memory.discover(`spot shouted by ${from}: ${text.slice(0, 40)}`, pos);
+    }
+  }
+
+  /** Attacked by a hostile: shout for help with coordinates (scripted; uses the normal shout cooldown). */
+  private maybeCallForHelp(): void {
+    const bot = this.bot;
+    if (!bot?.entity) return;
+    const attacker = this.hostilesWithin(6)[0];
+    if (!attacker) return;
+    const p = bot.entity.position;
+    const text = `HELP! ${attacker.name ?? 'mob'} attacking me at ${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}`;
+    if (!tryShout(bot, this.name, text, this.deps.config.shout)) {
+      this.jsonl.write('help_shout', { attacker: attacker.name, pos: { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) } });
+    }
+  }
+
   /**
    * The pathfinder sometimes keeps "walking" into a block (corner it can't pass, block that appeared on
    * the route). If it is moving but the bot hasn't advanced 0.3 blocks in 3 s: dig the block in front at
@@ -556,6 +644,8 @@ export class BotAgent {
       interruptedBy: this.interruptedBy,
       planNote: this.planNote,
       shoutCooldown: shoutCooldownLeft(this.name, this.deps.config.shout.cooldownSeconds),
+      chatRange: this.deps.config.chatRange,
+      silentSeconds: (Date.now() - this.lastSpokeAt) / 1000,
     });
     this.interruptedBy = undefined;
     this.planNote = undefined;
@@ -576,6 +666,12 @@ export class BotAgent {
         error: parsed.ok ? undefined : parsed.error,
       });
       if (parsed.ok) {
+        if (parsed.say && this.bot) {
+          this.bot.chat(parsed.say);
+          this.lastSpokeAt = Date.now();
+          this.log('info', `says: ${parsed.say}`);
+          this.jsonl.write('said', { text: parsed.say });
+        }
         if (parsed.steps.length > 1) this.log('info', `plan: ${parsed.steps.map((p) => p.skill).join(' -> ')} — ${parsed.thought}`);
         return parsed.steps;
       }
@@ -626,6 +722,9 @@ export class BotAgent {
     while (this.recentResults.length > 6) this.recentResults.shift();
     this.log('info', `  => ${result}`);
     this.jsonl.write('skill', { skill: action.skill, args: action.args, thought: action.thought, result, ms: Date.now() - started });
+    if ((action.skill === 'say' || action.skill === 'shout') && !looksFailed(result)) this.lastSpokeAt = Date.now();
+    const lesson = lessonFrom(action.skill, action.args, result);
+    if (lesson && this.memory.learn(lesson)) this.jsonl.write('lesson', { lesson });
     return { result, interrupted: ac.signal.aborted };
   }
 }

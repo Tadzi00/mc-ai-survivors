@@ -25,7 +25,7 @@ export function parseAction(text: string, tier: Tier): ParseResult {
   const o = { ...(obj as Record<string, unknown>) };
   if (o.skill === undefined && typeof o.action === 'string') o.skill = o.action;
   if (o.args === undefined) {
-    const { thought: _t, skill: _s, action: _a, ...rest } = o;
+    const { thought: _t, skill: _s, action: _a, say: _say, ...rest } = o;
     o.args = rest;
   }
   const env = Envelope.safeParse(o);
@@ -48,7 +48,14 @@ export function parseAction(text: string, tier: Tier): ParseResult {
 
 export const MAX_PLAN_STEPS = 5;
 
-export type PlanResult = { ok: true; thought: string; steps: PlannedAction[] } | { ok: false; error: string };
+export type PlanResult = { ok: true; thought: string; steps: PlannedAction[]; say?: string } | { ok: false; error: string };
+
+/** Optional free speech that comes with any reply: {"say":"..."}; spoken to nearby players, costs no turn. */
+function sayOf(o: Record<string, unknown>): string | undefined {
+  if (typeof o.say !== 'string') return undefined;
+  const t = o.say.replace(/^[/\s]+/, '').replace(/^\[SHOUT\]\s*/i, '').trim().slice(0, 200);
+  return t || undefined;
+}
 
 /**
  * Smart bots may answer with a short plan: {"thought","plan":[{"skill","args"},...]} (max 5 steps).
@@ -63,7 +70,7 @@ export function parsePlan(text: string, tier: Tier): PlanResult {
   const rawSteps = Array.isArray(o.plan) ? o.plan : Array.isArray(o.steps) ? o.steps : undefined;
   if (!rawSteps) {
     const single = parseAction(text, tier);
-    return single.ok ? { ok: true, thought: single.action.thought, steps: [single.action] } : single;
+    return single.ok ? { ok: true, thought: single.action.thought, steps: [single.action], say: sayOf(o) } : single;
   }
   if (rawSteps.length === 0) return { ok: false, error: 'plan is empty' };
   const thought = typeof o.thought === 'string' ? o.thought.slice(0, 300) : '';
@@ -74,7 +81,7 @@ export function parsePlan(text: string, tier: Tier): PlanResult {
     if (!r.ok) return { ok: false, error: `plan step ${i + 1}: ${r.error}` };
     steps.push({ ...r.action, thought: r.action.thought || thought });
   }
-  return { ok: true, thought, steps };
+  return { ok: true, thought, steps, say: sayOf(o) };
 }
 
 /** Heuristic: did a skill result string report failure? Used to abandon the rest of a plan. */

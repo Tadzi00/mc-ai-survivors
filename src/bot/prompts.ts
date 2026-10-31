@@ -16,6 +16,27 @@ const RULES_FULL = `WORLD RULES (important):
   in goto {x,y,z}, mark_place {name} saves a spot, goto {place} returns to it.
 - Sleep in your bed at night (it also claims it as yours).`;
 
+/**
+ * Deliberately SHORT: only the basics a new player would be told. Everything else the bots must find out
+ * (failed skills become "lessons") and pass on by talking, signs and books. See DESIGN.md "Cheat sheet".
+ */
+const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and teach each other):
+- Logs -> planks -> sticks. A crafting table (4 planks) is needed for tools.
+- Tool tiers: wood < stone < iron < diamond. Better ores need better pickaxes; wood can mine stone and coal.
+- Raw ores (raw_iron, raw_copper, raw_gold) are useless until SMELTED in a furnace (8 cobblestone) with fuel
+  (coal, charcoal, logs, planks). Tools are made from the ingots.
+- Torch = coal or charcoal + stick. Charcoal = smelt a log.
+- Food: kill animals; cooked meat (smelt it) feeds much more than raw. Food heals you when you are full.
+- Night: monsters spawn in darkness. Zombies and skeletons burn in sunlight; creepers explode; spiders climb.
+- Falling more than ~4 blocks hurts; lava kills; you can drown.`;
+
+const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survive by sharing:
+- Add "say" to your reply to talk WITHOUT spending an action: tell nearby bots what you found (with coordinates),
+  what you learned (your "Lessons learned"), what you plan, or ask them questions. Answer when someone asks you.
+- Agree who does what (one gets wood, one hunts, one builds). Warn about dangers and deaths.
+- Use shout for important far-away news (village spot, danger, found iron). Write signs/books so the
+  knowledge survives you.`;
+
 const RULES_SHORT = `RULES: Winter cold kills - stay in a sealed room (walls+roof+door, no holes) with a torch inside.
 New teammates are born only if every bot has its own bed in a sealed warm room plus one spare bed.
 Death is permanent. say reaches 15 blocks; shout reaches 1000 blocks (max 15 words, once a minute).
@@ -23,10 +44,10 @@ Death is permanent. say reaches 15 blocks; shout reaches 1000 blocks (max 15 wor
 there. Read signs for knowledge.`;
 
 const FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 20 words>","skill":"<skill name>","args":{...}}`;
+{"thought":"<max 20 words>","say":"<optional: words to nearby bots>","skill":"<skill name>","args":{...}}`;
 
 const SMART_FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 30 words>","plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
+{"thought":"<max 30 words>","say":"<optional: words to nearby bots>","plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
 
 export interface ShoutRules {
   range: number;
@@ -60,10 +81,12 @@ VILLAGE: your tribe should live together. If no village is known: pick a good sp
 near), mark_place "village", and shout its coordinates (e.g. "Village at 120 70 -45, come build here").
 If someone shouted a village: goto it and build your shelter and beds there. Safety in numbers.
 
-STRATEGY HINTS: wood -> planks/sticks -> crafting table -> wooden pickaxe -> stone tools. Collect ~80 blocks
-(planks/cobblestone/dirt), then build_shelter, put a bed inside (bed = 3 wool + 3 planks; wool from sheep),
-then a SPARE bed for a newborn. Store food. Keep a long-term goal with set_goal; record discoveries with remember.
-Teach others: write signs/books with recipes, dangers, and where home/beds/chests are.
+${CHEAT_SHEET}
+
+${SOCIAL}
+
+GAME-SPECIFIC: a bed is 3 wool + 3 planks (wool from sheep). Shelters need ~70 blocks (planks/cobblestone/dirt)
+and a door (6 planks). Keep a long-term goal with set_goal. Your finds and lessons are remembered automatically.
 
 SKILLS (name {args} description):
 ${skills}
@@ -72,6 +95,8 @@ ${SMART_FORMAT}`;
   }
   return `You are ${name}, a survivor bot in Minecraft. Pick ONE simple action at a time.
 ${RULES_SHORT}
+${CHEAT_SHEET}
+${SOCIAL}
 Do the NEXT STEP shown in your observation (it is a ready skill call) unless it just failed - then fix the
 reason given. Follow your tribe's leaders and signs.
 
@@ -82,5 +107,5 @@ ${FORMAT}`;
 }
 
 export function retryPrompt(error: string): string {
-  return `That reply was invalid: ${error}. Reply again with ONLY one JSON object {"thought":"...","skill":"...","args":{...}} using a listed skill.`;
+  return `That reply was invalid: ${error}. Reply again with ONLY one JSON object using listed skills, e.g. {"thought":"...","say":"...","skill":"...","args":{...}} or {"thought":"...","plan":[{"skill":"...","args":{...}}]}.`;
 }

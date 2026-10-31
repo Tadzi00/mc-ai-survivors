@@ -1,4 +1,5 @@
 import type { Item } from 'prismarine-item';
+import type { Block } from 'prismarine-block';
 import { throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
@@ -27,6 +28,16 @@ export async function placeTorchSkill(ctx: SkillContext): Promise<string> {
   const torch = findItem(bot, 'torch');
   if (!spot || !torch) return 'no spot for a torch';
   return (await placeItemAt(ctx, torch, spot)) ? `placed torch at ${fmtPos(spot)}` : 'failed to place torch';
+}
+
+/**
+ * A block that already stands where a wall/roof/floor block should go only counts if it is a real
+ * building block. Leaves, panes, fences, snow, ice etc. leak heat (and leaves decay), so they are
+ * dug out and replaced.
+ */
+const WEAK_BLOCK_RE = /leaves|_pane$|fence|snow|ice$|sapling|bamboo|cactus|scaffolding|mushroom|vine|azalea|_carpet$|torch|_door$|_trapdoor$/;
+function isGoodShellBlock(b: Block | null): boolean {
+  return isSolid(b) && !WEAK_BLOCK_RE.test(b!.name);
 }
 
 /** Picks the most plentiful building block stack, refreshed as stacks run out. */
@@ -73,20 +84,32 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
   const floor: Vec3[] = [];
   for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) floor.push(v3(x, y0 - 1, z));
 
-  const needed = [...floor, ...wall, ...roof].filter((p) => !isSolid(bot.blockAt(p))).length;
+  const needed = [...floor, ...wall, ...roof].filter((p) => !isGoodShellBlock(bot.blockAt(p))).length;
   const have = bot.inventory.items().filter((i) => BUILDING_BLOCK_RE.test(i.name)).reduce((n, i) => n + i.count, 0);
   if (have < needed) {
     return `not enough blocks: need ${needed}, have ${have} (planks/cobblestone/dirt/logs). Gather more first.`;
   }
-  const hasDoor = countItem(bot, /_door$/) > 0 || (await craftSkill(ctx, { item: doorNameFor(ctx), count: 1 })).startsWith('crafted');
+  // Craft the door FIRST so building doesn't use up the planks it needs (door = 6 planks).
+  let doorWhy = '';
+  if (countItem(bot, /_door$/) === 0) {
+    const r = await craftSkill(ctx, { item: doorNameFor(ctx), count: 1 });
+    if (!r.startsWith('crafted')) doorWhy = r;
+  }
+  const hasDoor = countItem(bot, /_door$/) > 0;
 
   // Stand in the centre so everything is within reach.
   await gotoNear(ctx, origin.x, origin.y, origin.z, 0, 15_000).catch(() => undefined);
 
-  let placed = 0, failed = 0;
+  let placed = 0, failed = 0, replaced = 0;
   for (const p of [...floor, ...wall, ...roof]) {
     throwIfAborted(ctx.signal);
-    if (isSolid(bot.blockAt(p))) continue;
+    const existing = bot.blockAt(p);
+    if (isGoodShellBlock(existing)) continue;
+    if (existing && existing.boundingBox === 'block' && bot.canDigBlock(existing)) {
+      // leaves & co: remove, then place a proper block
+      await bot.dig(existing, true).catch(() => undefined);
+      replaced++;
+    }
     const item = pickBuildingItem(ctx);
     if (!item) break;
     if (await placeItemAt(ctx, item, p)) placed++;
@@ -94,15 +117,17 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
   }
   let doorOk = false;
   if (hasDoor) {
-    const door = findItem(bot, /_door$/);
-    if (door) doorOk = await placeItemAt(ctx, door, v3(doorX, y0, doorZ));
+    const r = await placeDoor(ctx, v3(doorX, y0, doorZ), origin);
+    doorOk = r === 'ok';
+    if (!doorOk) doorWhy = r;
   }
   if (!doorOk) {
-    // No door: seal the doorway instead so the room is still valid (exit by digging).
+    // No door: seal the doorway so the room still counts as sealed. Remembered so the bot can fix it.
     for (const p of [v3(doorX, y0, doorZ), v3(doorX, y0 + 1, doorZ)]) {
       const item = pickBuildingItem(ctx);
       if (item) await placeItemAt(ctx, item, p);
     }
+    ctx.memory.setPlace('doorway', v3(doorX, y0, doorZ));
   }
   // Torch on the floor inside, away from the centre.
   let torchMsg = 'no torch';
@@ -112,8 +137,70 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
     if (torch && isAirLike(bot.blockAt(tp)) && (await placeItemAt(ctx, torch, tp))) torchMsg = 'torch placed';
   }
   ctx.memory.setPlace('home', origin);
-  ctx.memory.addNote(`Built shelter (size ${s}) at ${fmtPos(origin)}${doorOk ? ' with door on south side' : ' (sealed, no door)'}.`);
-  return `shelter at ${fmtPos(origin)}: placed ${placed} blocks, ${failed} failed, ${doorOk ? 'door ok' : 'no door (sealed)'}, ${torchMsg}. Next: place_bed inside.`;
+  ctx.memory.addNote(
+    `Built shelter (size ${s}) at ${fmtPos(origin)}${doorOk ? ` with door at ${doorX},${y0},${doorZ}` : `; doorway at ${doorX},${y0},${doorZ} is walled up (no door: ${doorWhy.slice(0, 60)})`}.`,
+  );
+  return `shelter at ${fmtPos(origin)}: placed ${placed} blocks (${replaced} leaves/weak blocks replaced), ${failed} failed, ${doorOk ? 'door ok' : `NO DOOR (${doorWhy.slice(0, 80)}) - doorway walled up; craft a door (6 planks) and run add_door`}, ${torchMsg}. Next: place_bed inside.`;
+}
+
+/**
+ * Places a door in a doorway: clears the two doorway cells, stands inside facing out, and places the door
+ * on TOP of the floor block (doors can only be placed on a block's top face). Returns 'ok' or a reason.
+ */
+async function placeDoor(ctx: SkillContext, doorway: Vec3, inside: Vec3): Promise<string> {
+  const { bot } = ctx;
+  const door = findItem(bot, /_door$/);
+  if (!door) return 'no door item';
+  for (const p of [doorway, doorway.offset(0, 1, 0)]) {
+    const b = bot.blockAt(p);
+    if (b && b.boundingBox === 'block') {
+      if (/_door$/.test(b.name)) return 'ok';
+      if (!bot.canDigBlock(b)) return `cannot clear ${b.name} in the doorway`;
+      await bot.dig(b, true).catch(() => undefined);
+    }
+  }
+  const floor = bot.blockAt(doorway.offset(0, -1, 0));
+  if (!isSolid(floor)) return 'no solid floor under the doorway';
+  if (bot.entity.position.distanceTo(doorway) > 4) await gotoNear(ctx, inside.x, inside.y, inside.z, 1, 10_000).catch(() => undefined);
+  try {
+    await bot.equip(door, 'hand');
+    await bot.lookAt(doorway.offset(0.5, 0, 0.5), true);
+    await bot.placeBlock(floor!, v3(0, 1, 0));
+  } catch {
+    /* verify below */
+  }
+  const placed = bot.blockAt(doorway);
+  return placed && /_door$/.test(placed.name) ? 'ok' : 'door placement failed';
+}
+
+/** add_door skill: put a door into a walled-up or empty doorway of your shelter. */
+export async function addDoorSkill(ctx: SkillContext): Promise<string> {
+  const { bot } = ctx;
+  const home = ctx.memory.place('home');
+  if (!home) return 'no home known (build_shelter first)';
+  // Shelters built before doorways were remembered: the template puts the door in the middle of the
+  // south wall, 2 blocks from the centre (size 5; size 4-7 use floor(size/2)).
+  let doorway = ctx.memory.place('doorway');
+  if (!doorway) {
+    for (const dz of [2, 3, 1]) {
+      const b = bot.blockAt(v3(home.x, home.y, home.z + dz));
+      if (b && /_door$/.test(b.name)) return 'your shelter already has a door';
+      if (b && b.boundingBox === 'block' && bot.blockAt(v3(home.x, home.y, home.z + dz + 1))?.boundingBox !== 'block') {
+        doorway = { x: home.x, y: home.y, z: home.z + dz };
+        break;
+      }
+    }
+    if (!doorway) return 'could not find the doorway of your shelter';
+  }
+  if (countItem(bot, /_door$/) === 0) {
+    const r = await craftSkill(ctx, { item: doorNameFor(ctx), count: 1 });
+    if (!r.startsWith('crafted')) return `need a door first: ${r}`;
+  }
+  const r = await placeDoor(ctx, v3(doorway.x, doorway.y, doorway.z), v3(home.x, home.y, home.z));
+  if (r !== 'ok') return `could not add door: ${r}`;
+  delete ctx.memory.data.places.doorway;
+  ctx.memory.addNote(`Added a door to my shelter at ${fmtPos(doorway)}.`);
+  return `door added at ${fmtPos(doorway)}`;
 }
 
 function doorNameFor(ctx: SkillContext): string {

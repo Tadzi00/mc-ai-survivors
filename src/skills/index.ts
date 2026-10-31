@@ -1,6 +1,6 @@
 import type { SkillContext } from './context.js';
 import type { SkillArgsOf, SkillName } from './schemas.js';
-import { buildShelterSkill, placeBedSkill, placeBlockSkill, placeTorchSkill } from './impl/building.js';
+import { addDoorSkill, buildShelterSkill, placeBedSkill, placeBlockSkill, placeTorchSkill } from './impl/building.js';
 import { farmSkill } from './impl/farm.js';
 import {
   checkTemperatureSkill, markPlaceSkill, readBookSkill, readSignsSkill, rememberSkill, saySkill, shoutSkill, setGoalSkill, waitSkill, writeBookSkill, writeSignSkill,
@@ -25,6 +25,7 @@ export const SKILLS: Registry = {
   place_block: placeBlockSkill,
   build_shelter: buildShelterSkill,
   place_bed: placeBedSkill,
+  add_door: addDoorSkill,
   place_torch: placeTorchSkill,
   farm: farmSkill,
   chest_store: chestStoreSkill,

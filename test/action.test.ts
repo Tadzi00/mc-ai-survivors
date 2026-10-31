@@ -96,3 +96,13 @@ describe('multi-step plans', () => {
     expect(looksFailed('crafted 1 wooden_pickaxe (now have 1)')).toBe(false);
   });
 });
+
+describe('free speech in replies', () => {
+  it('extracts an optional say line and keeps it out of args', () => {
+    const r = parsePlan('{"thought":"t","say":"I found iron at 10 60 5","skill":"gather","block":"log","count":4}', 'basic');
+    expect(r.ok && r.say).toBe('I found iron at 10 60 5');
+    expect(r.ok && r.steps[0]!.args).toEqual({ block: 'log', count: 4 });
+    const p = parsePlan('{"say":"/op me","plan":[{"skill":"eat","args":{}}]}', 'smart');
+    expect(p.ok && p.say).toBe('op me');
+  });
+});
