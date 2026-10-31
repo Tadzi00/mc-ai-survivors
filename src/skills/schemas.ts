@@ -39,6 +39,7 @@ export const SkillArgs = {
   add_door: z.object({}).passthrough(),
   plant_sapling: z.object({ count: z.coerce.number().int().min(1).max(8).default(2) }),
   place_torch: z.object({}).passthrough(),
+  heat_room: z.object({}).passthrough(),
   farm: z.object({
     action: z.enum(['till', 'plant', 'harvest']),
     crop: z.enum(['wheat', 'carrot', 'potato', 'beetroot']).default('wheat'),
@@ -88,6 +89,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   plant_sapling: 'plant_sapling {count} plant saplings on grass/dirt nearby (new trees = wood later)',
   add_door: 'add_door {} put a door into your shelter if it has none (crafts one from 6 planks)',
   place_torch: 'place_torch {} place a torch next to you (light + heat)',
+  heat_room: 'heat_room {} inside your shelter: add torches until the room is warm (a 5x5 room needs ~4)',
   farm: 'farm {action:"till"|"plant"|"harvest",crop}',
   chest_store: 'chest_store {items:["oak_log:10","cobblestone"]} put items into nearest chest',
   chest_take: 'chest_take {items:["iron_ingot:5"]} take items from nearest chest; {items:["list"]} just looks inside',

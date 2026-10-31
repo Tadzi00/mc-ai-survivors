@@ -2,7 +2,7 @@
 // returns { ok, why }. The bot stands at (X, Y, Z) on a stone platform at Y-1. Check results via P.cmd (RCON).
 import { writeSignSkill, readSignsSkill, writeBookSkill, readBookSkill } from '../dist/skills/impl/knowledge.js';
 import { smeltSkill, gatherSkill, craftSkill } from '../dist/skills/impl/resources.js';
-import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill } from '../dist/skills/impl/building.js';
+import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill } from '../dist/skills/impl/building.js';
 import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill } from '../dist/skills/impl/movement.js';
@@ -20,7 +20,8 @@ async function room(P, { door = true } = {}) {
     await P.cmd(`setblock ${X} ${Y} ${Z + 2} minecraft:oak_door[half=lower,facing=south]`);
     await P.cmd(`setblock ${X} ${Y + 1} ${Z + 2} minecraft:oak_door[half=upper,facing=south]`);
   }
-  await P.sleep(800);
+  // RCON fills fire no block events, so RealisticSeasons' 5 s "outside" cache must expire on its own.
+  await P.sleep(6000);
 }
 
 export const scenarios = {
@@ -132,6 +133,18 @@ export const scenarios = {
     await P.sleep(600);
     const r = await placeTorchSkill(ctx);
     return ok(/placed torch/.test(r), r);
+  },
+
+  async heat_room(ctx, P) {
+    await room(P);
+    await P.give('torch', 8);
+    await P.sleep(1200);
+    const r = await heatRoomSkill(ctx);
+    const after = JSON.parse((await P.cmd(`room raw ${P.X} ${P.Y} ${P.Z}`)).split('|').pop());
+    const eq = after.equilibriumC ?? after.tempC;
+    let torches = 0;
+    for (let x = P.X - 2; x <= P.X + 2; x++) for (let z = P.Z - 2; z <= P.Z + 2; z++) if (await isBlock(P, x, P.Y, z, 'minecraft:torch')) torches++;
+    return ok(eq >= 12 && eq <= 28, `${r} | room now ${after.tempC}C, heading to ${eq}C | torches in room=${torches} sealed=${after.sealed} vol=${after.volume} leaks=${JSON.stringify(after.leaks)}`);
   },
 
   async hunt(ctx, P) {

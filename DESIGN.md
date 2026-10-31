@@ -281,6 +281,15 @@ Bots read `temp raw player <name>` every 30 s, so the observation shows their BO
 `bot.coldThresholdC` and uncomfortable OR the body stage is COLD/SHIVERING/HYPOTHERMIA. Damage while
 hypothermic wakes the planner with reason "freezing damage".
 
+### 6.5.3 Heating rooms (measured)
+
+Sealed 5x5 shelter on a −3 °C night (RealisticSeasons defaults): no heat 1.9 °C, 1 torch 3.3, 2 torches 9.8,
+4 torches 23 (comfortable), lantern 6.1, lit furnace 30.9 (too hot), campfire 41 (too hot). Room air lags
+behind (thermal inertia, ~2 min), so bots judge by `equilibriumC` from `room raw`. `heat_room` adds torches
+one at a time on floor cells inside the room (flood fill from the bot; a plain radius put torches behind
+the walls) until the target is 12-28 °C. `build_shelter` runs it at the end; the warm_home reflex uses it;
+the progress step "warm shelter" is done only when the room is warm (or 4+ torches without readings).
+
 ### 6.6 Food
 
 - `eat` reflex when food <= 14 (or hurt and not full) and there is food.

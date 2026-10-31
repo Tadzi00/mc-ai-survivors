@@ -72,6 +72,8 @@ export const SeasonsReadingSchema = z.object({
   comfortable: z.boolean(),
   /** Only in `temp raw player <name>` (additive v1 fields): the player's core temperature and stage. */
   bodyC: z.number().optional(),
+  /** Only in `room raw` inside a room: temperature the room air is heading to. */
+  equilibriumC: z.number().optional(),
   stage: z.string().optional(),
 });
 export type SeasonsReading = z.infer<typeof SeasonsReadingSchema>;

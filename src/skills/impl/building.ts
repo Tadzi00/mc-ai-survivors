@@ -176,6 +176,10 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
     const tp = v3(x0 + 1, y0, z0 + 1);
     if (torch && isAirLike(bot.blockAt(tp)) && (await placeItemAt(ctx, torch, tp))) torchMsg = 'torch placed';
   }
+  if (torchMsg === 'torch placed' && ctx.seasons.enabled) {
+    await gotoNear(ctx, origin.x, origin.y, origin.z, 0, 8_000).catch(() => undefined);
+    torchMsg = await heatRoomSkill(ctx, 4);
+  }
   ctx.memory.setPlace('home', origin);
   (ctx.memory.data.shelters ??= []).push({ x0, z0, x1, z1, y0 });
   ctx.memory.save();
@@ -461,4 +465,62 @@ export async function extendShelterSkill(ctx: SkillContext, a: SkillArgsOf<'exte
   ctx.memory.save();
   ctx.memory.addNote(`Extended my shelter ${a.direction} by ${L} (${box.x0},${box.z0} to ${box.x1},${box.z1}).`);
   return `added a room on the ${a.direction} side: placed ${placed} blocks, ${failed} failed, ${opened ? 'opening made in the shared wall' : doorThere ? 'rooms connected through the old door' : 'shared wall already open'}, ${torchMsg}`;
+}
+
+/**
+ * heat_room: place torches inside the room the bot stands in, one at a time, re-checking the real room
+ * temperature (RealisticSeasons) after each, until it is comfortable, too hot, or 6 torches were added.
+ * A sealed 5x5 room needs about 4 torches (measured: 1 torch +1.5C, 2 +8C, 4 +25C over a cold night).
+ */
+export async function heatRoomSkill(ctx: SkillContext, max = 6): Promise<string> {
+  const { bot } = ctx;
+  // Judge by the temperature the room is HEADING to (thermal inertia makes the current one lag minutes).
+  const read = async (): Promise<{ tempC: number; comfortable: boolean; inside: boolean; sealed: boolean } | undefined> => {
+    if (!ctx.seasons.enabled) return undefined;
+    const p = bot.entity.position.floored();
+    const r = await ctx.seasons.room(p.x, p.y, p.z).catch(() => undefined);
+    if (!r) return undefined;
+    const t = r.equilibriumC ?? r.tempC;
+    return { tempC: t, comfortable: r.equilibriumC !== undefined ? t >= 12 && t <= 28 : r.comfortable, inside: r.inside, sealed: r.sealed };
+  };
+  let r = await read();
+  if (r && !r.inside) return `you are not inside a room (${r.tempC.toFixed(1)}C): go inside your shelter first`;
+  if (r && r.comfortable) return `room is already warm enough (heading to ${r.tempC.toFixed(1)}C)`;
+  let added = 0;
+  const base = bot.entity.position.floored();
+  // Floor spots INSIDE this room: flood fill from the bot through open cells at its height (walls and doors
+  // stop it). A plain radius also found cells behind the walls, and torches went outside.
+  const spots: Vec3[] = [];
+  const seen = new Set<string>([`${base.x},${base.z}`]);
+  const queue: Vec3[] = [base];
+  while (queue.length && seen.size < 200) {
+    const c = queue.shift()!;
+    for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) {
+      const n = c.plus(d);
+      const key = `${n.x},${n.z}`;
+      if (seen.has(key) || Math.abs(n.x - base.x) > 8 || Math.abs(n.z - base.z) > 8) continue;
+      seen.add(key);
+      const b = bot.blockAt(n);
+      if (!isAirLike(b) || /_door$/.test(b?.name ?? '')) continue;
+      queue.push(n);
+      if (isSolid(bot.blockAt(n.offset(0, -1, 0)))) spots.push(n);
+    }
+  }
+  spots.sort((p, q) => q.distanceTo(base) - p.distanceTo(base)); // far (edges/corners) first
+  for (const p of spots) {
+    if (added >= max) break;
+    if (r && (r.comfortable || r.tempC > 28)) break;
+    if (countItem(bot, 'torch') === 0) {
+      const c = await craftSkill(ctx, { item: 'torch', count: 4 });
+      if (!c.startsWith('crafted')) return `added ${added} torch(es)${r ? `, room ${r.tempC.toFixed(1)}C` : ''}; need more torches: ${c}`;
+    }
+    const torch = findItem(bot, 'torch');
+    if (!torch || p.distanceTo(bot.entity.position) > 4.5) continue;
+    if (!(await placeItemAt(ctx, torch, p))) continue;
+    added++;
+    await sleep(600); // let the plugin rescan the room
+    r = await read();
+  }
+  if (!r) return `placed ${added} torch(es) (no temperature readings on this server)`;
+  return `placed ${added} torch(es); room warming to ${r.tempC.toFixed(1)}C, ${r.comfortable ? 'comfortable' : r.tempC > 28 ? 'too hot' : 'still cold - add more heat'}${r.sealed ? '' : ' (room is NOT sealed: fix holes)'}`;
 }

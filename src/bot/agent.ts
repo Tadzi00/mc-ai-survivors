@@ -14,7 +14,7 @@ import type { SkillContext } from '../skills/context.js';
 import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
-import { placeTorchSkill } from '../skills/impl/building.js';
+import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
 import { JsonlLog, log, shortHash } from '../util/log.js';
 import { AbortError, sleep, TimeoutError } from '../util/time.js';
 import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './action.js';
@@ -999,7 +999,7 @@ export class BotAgent {
           await gotoNear(ctx, home.x, home.y, home.z, 1, 18_000).catch(() => undefined);
           return 'went home to warm up';
         }
-        return countItem(bot, 'torch') > 0 ? placeTorchSkill(ctx) : 'at home but no torch';
+        return heatRoomSkill(ctx, 3); // add torches until the room is actually warm
       }
       case 'warm_torch':
         return placeTorchSkill(ctx);
