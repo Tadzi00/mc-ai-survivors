@@ -211,3 +211,10 @@ MIT © 2026 Tadzi00
 | `/survivors unprotect` / `/survivors areas` | Remove / list protected areas (op) |
 | `/survivors inv Surv_06` | Read-only view of its inventory (op) |
 | `/survivors grace start\|stop\|status` | First-day "no hostile mobs" period (op) |
+
+## Running the bots without Docker (development)
+
+`scripts/run-bots.sh` runs the orchestrator against `localhost` (server + Ollama) and restarts it
+automatically if it exits. After `npm run build`, `pkill -f "^node dist/index.js"` makes it pick up the new
+code within 5 s. Live tests: `node scripts/harness.mjs` (skills) and `node scripts/agent-harness.mjs`
+(reflexes, rescue, orders); both use a temporary platform far from spawn and clean up after themselves.
