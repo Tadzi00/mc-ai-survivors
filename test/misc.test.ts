@@ -15,9 +15,18 @@ describe('reflex choice', () => {
   it('lava beats everything', () => expect(chooseReflex({ ...calm, inLava: true, food: 1 })).toBe('escape_lava'));
   it('surfaces when drowning', () => expect(chooseReflex({ ...calm, inWater: true, oxygen: 5 })).toBe('surface'));
   it('fights when healthy, flees when weak or vs creeper', () => {
-    expect(chooseReflex({ ...calm, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
-    expect(chooseReflex({ ...calm, health: 6, hostile: { distance: 4, type: 'zombie' } })).toBe('flee');
+    const z = { distance: 4, type: 'zombie' };
+    expect(chooseReflex({ ...calm, hostile: z })).toBe('fight'); // full health, one mob, bare hands
+    expect(chooseReflex({ ...calm, health: 6, hostile: z })).toBe('flee');
     expect(chooseReflex({ ...calm, hostile: { distance: 4, type: 'creeper' } })).toBe('flee');
+  });
+  it('bare-handed bots avoid risky fights; armed bots fight on', () => {
+    const z = { distance: 4, type: 'zombie' };
+    expect(chooseReflex({ ...calm, health: 14, hostile: z })).toBe('flee');
+    expect(chooseReflex({ ...calm, hostile: z, nearbyHostiles: 2 })).toBe('flee');
+    expect(chooseReflex({ ...calm, health: 12, hasWeapon: true, hostile: z })).toBe('fight');
+    expect(chooseReflex({ ...calm, health: 12, hasWeapon: true, hostile: z, nearbyHostiles: 3 })).toBe('flee');
+    expect(chooseReflex({ ...calm, health: 8, hasWeapon: true, hostile: z })).toBe('flee');
   });
   it('eats when hungry', () => expect(chooseReflex({ ...calm, food: 10 })).toBe('eat'));
   it('warms up when cold', () => {

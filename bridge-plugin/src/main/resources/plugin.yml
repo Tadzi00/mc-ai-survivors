@@ -8,7 +8,7 @@ softdepend: [RealisticSeasons]
 commands:
   survivors:
     description: SurvivorsBridge admin and orchestrator commands
-    usage: /survivors <beds|canspawn|assign|unassign|scan|check|grace>
+    usage: /survivors <beds|canspawn|assign|unassign|scan|check|grace|inv>
     permission: survivorsbridge.admin
 permissions:
   survivorsbridge.admin:

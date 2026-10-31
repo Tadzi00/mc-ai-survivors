@@ -20,6 +20,7 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
     private RealisticSeasonsBridge seasons;
     private SimpleEnclosureChecker builtin;
     private GracePeriod grace;
+    private final InventoryViewer viewer = new InventoryViewer();
 
     @Override
     public void onEnable() {
@@ -30,6 +31,7 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new BedListener(this), this);
         grace = new GracePeriod(this);
         getServer().getPluginManager().registerEvents(grace, this);
+        getServer().getPluginManager().registerEvents(viewer, this);
         PluginCommand cmd = getCommand("survivors");
         if (cmd != null) {
             SurvivorsCommand handler = new SurvivorsCommand(this);
@@ -44,6 +46,10 @@ public final class SurvivorsBridgePlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (index != null) index.save();
+    }
+
+    public InventoryViewer viewer() {
+        return viewer;
     }
 
     public GracePeriod grace() {

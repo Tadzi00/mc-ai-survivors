@@ -45,6 +45,7 @@ public final class SurvivorsCommand implements TabExecutor {
                 case "scan" -> scan(sender, args);
                 case "check" -> check(sender, args);
                 case "grace" -> grace(sender, args);
+                case "inv" -> inv(sender, args);
                 default -> help(sender);
             }
         } catch (IllegalArgumentException e) {
@@ -60,6 +61,7 @@ public final class SurvivorsCommand implements TabExecutor {
         s.sendMessage("/survivors unassign <bot>");
         s.sendMessage("/survivors scan <radius> [x y z [world]]");
         s.sendMessage("/survivors grace <start [ticks] [world]|stop [world]|status [world]>");
+        s.sendMessage("/survivors inv <player>  (read-only view of a bot's inventory)");
         s.sendMessage("/survivors check <x> <y> <z> [world]");
     }
 
@@ -187,6 +189,14 @@ public final class SurvivorsCommand implements TabExecutor {
         }
     }
 
+    private void inv(CommandSender s, String[] a) {
+        if (!(s instanceof Player viewer)) throw new IllegalArgumentException("only players can open inventories");
+        if (a.length < 2) throw new IllegalArgumentException("usage: /survivors inv <player>");
+        Player target = Bukkit.getPlayerExact(a[1]);
+        if (target == null) throw new IllegalArgumentException(a[1] + " is not online");
+        plugin.viewer().open(viewer, target);
+    }
+
     private static World world(CommandSender s, String name) {
         if (name != null) {
             World w = Bukkit.getWorld(name);
@@ -209,8 +219,15 @@ public final class SurvivorsCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
         if (a.length == 1) {
             List<String> out = new ArrayList<>();
-            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check", "grace")) {
+            for (String o : List.of("beds", "canspawn", "assign", "unassign", "scan", "check", "grace", "inv")) {
                 if (o.startsWith(a[0].toLowerCase())) out.add(o);
+            }
+            return out;
+        }
+        if (a.length == 2 && (a[0].equalsIgnoreCase("inv") || a[0].equalsIgnoreCase("unassign"))) {
+            List<String> out = new ArrayList<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (p.getName().toLowerCase().startsWith(a[1].toLowerCase())) out.add(p.getName());
             }
             return out;
         }

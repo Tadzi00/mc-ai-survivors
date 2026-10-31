@@ -4,6 +4,7 @@ import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS } from '../skills/helpers.js';
 import type { HeardMessage } from './chat.js';
 import type { Memory } from './memory.js';
+import { progressText } from './progress.js';
 
 export interface ObservationInput {
   bot: Bot;
@@ -70,6 +71,7 @@ export function buildObservation(o: ObservationInput): string {
   }
   lines.push(`Goal: ${memory.data.goal ?? '(none)'}`);
   lines.push(`Inventory: ${inventorySummary(bot)}. Holding: ${bot.heldItem?.name ?? 'nothing'}.`);
+  lines.push(progressFor(o));
 
   const notable: string[] = [];
   const allNames = Object.keys(bot.registry.blocksByName);
@@ -111,4 +113,24 @@ export function buildObservation(o: ObservationInput): string {
   }
   if (o.interruptedBy) lines.push(`(Your last action was interrupted by reflex: ${o.interruptedBy})`);
   return lines.join('\n');
+}
+
+function progressFor(o: ObservationInput): string {
+  const { bot, memory } = o;
+  const items: Record<string, number> = {};
+  let foodCount = 0;
+  for (const i of bot.inventory.items()) {
+    items[i.name] = (items[i.name] ?? 0) + i.count;
+    if (bot.registry.foodsByName[i.name] && !/rotten|spider_eye|poisonous/.test(i.name)) foodCount += i.count;
+  }
+  const t = o.temp;
+  return progressText({
+    items,
+    foodCount,
+    tableNearby: findBlocks(bot, ['crafting_table'], 24, 1).length > 0,
+    homeKnown: !!memory.place('home'),
+    bedKnown: !!memory.place('bed'),
+    spareBedKnown: !!memory.place('spare_bed'),
+    warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
+  });
 }

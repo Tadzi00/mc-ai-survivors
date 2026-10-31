@@ -151,6 +151,7 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
         return `placed and claimed my bed at ${fmtPos(foot)}`;
       }
       ctx.memory.addNote(`Spare bed for a newborn at ${fmtPos(foot)}.`);
+      ctx.memory.setPlace('spare_bed', foot);
       return `placed spare bed at ${fmtPos(foot)} (left unclaimed for a newborn)`;
     }
   }

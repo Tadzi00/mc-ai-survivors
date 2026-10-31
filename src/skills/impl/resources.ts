@@ -82,22 +82,41 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   return `gathered ${got} ${a.block} (wanted ${a.count})`;
 }
 
+/** Why the last ensureCraftingTable call failed (shown to the model), per bot. */
+const tableProblem = new WeakMap<Bot, string>();
+
 /** Finds a crafting table within 24 blocks, or crafts+places one. */
 export async function ensureCraftingTable(ctx: SkillContext): Promise<Block | undefined> {
   const { bot } = ctx;
+  tableProblem.delete(bot);
   const existing = nearestBlock(bot, ['crafting_table'], 24);
   if (existing) return existing;
   if (countItem(bot, 'crafting_table') === 0) {
     if (countItem(bot, /_planks$/) < 4) await craftPlanksFromLogs(bot, 1);
     const id = bot.registry.itemsByName.crafting_table!.id;
     const r = bot.recipesFor(id, null, 1, null)[0];
-    if (!r) return undefined;
+    if (!r) {
+      tableProblem.set(bot, 'no crafting table and not enough planks to make one (4 planks)');
+      return undefined;
+    }
     await bot.craft(r, 1, undefined);
+    await clearCraftingGrid(bot);
+    await sleep(300);
+  }
+  const item = findItem(bot, 'crafting_table');
+  if (!item) {
+    tableProblem.set(bot, 'crafting a crafting table failed');
+    return undefined;
   }
   const spot = freeSpotNearBot(bot);
-  const item = findItem(bot, 'crafting_table');
-  if (!spot || !item) return undefined;
-  if (!(await placeItemAt(ctx, item, spot))) return undefined;
+  if (!spot) {
+    tableProblem.set(bot, 'no free spot to place the crafting table here; move to open flat ground (explore) and retry');
+    return undefined;
+  }
+  if (!(await placeItemAt(ctx, item, spot))) {
+    tableProblem.set(bot, `could not place the crafting table at ${spot.x},${spot.y},${spot.z}; move a few blocks and retry`);
+    return undefined;
+  }
   ctx.memory.setPlace('crafting_table', spot);
   return bot.blockAt(spot) ?? undefined;
 }
@@ -125,6 +144,21 @@ async function autoIntermediates(ctx: SkillContext, itemName: string): Promise<v
 }
 
 /**
+ * A failed/partial craft can leave items in the player's 2x2 crafting grid (inventory slots 1-4). Four planks
+ * there silently become a crafting table on the next craft, so always move leftovers back to the inventory.
+ */
+async function clearCraftingGrid(bot: Bot): Promise<void> {
+  for (const slot of [1, 2, 3, 4]) {
+    if (!bot.inventory.slots[slot]) continue;
+    try {
+      await bot.clickWindow(slot, 0, 1); // shift-click: move to inventory
+    } catch {
+      /* ignore: best effort */
+    }
+  }
+}
+
+/**
  * bot.craft right after another craft often fails with "missing ingredient" because the client inventory
  * hasn't caught up with the server yet. Wait a bit, re-pick the recipe and retry.
  */
@@ -134,8 +168,10 @@ async function craftWithRetry(ctx: SkillContext, itemId: number, first: Recipe, 
   for (let i = 0; ; i++) {
     try {
       await bot.craft(recipe, times, table);
+      await clearCraftingGrid(bot);
       return;
     } catch (e) {
+      await clearCraftingGrid(bot);
       if (i >= 2 || !/missing ingredient/i.test((e as Error).message)) throw e;
       throwIfAborted(ctx.signal);
       await sleep(500 * (i + 1));
@@ -173,6 +209,12 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
   const { bot } = ctx;
   const item = bot.registry.itemsByName[woodAlias(bot, a.item.toLowerCase().replace(/^minecraft:/, ''))];
   if (!item) return `unknown item "${a.item}"`;
+  if (item.name === 'crafting_table') {
+    const have = countItem(bot, 'crafting_table');
+    if (have > 0) return `you already have ${have} crafting_table in your inventory; craft tools directly (a table is placed automatically)`;
+    if (nearestBlock(bot, ['crafting_table'], 24)) return 'a crafting_table is already placed nearby; craft tools directly';
+  }
+  await clearCraftingGrid(bot);
   const before = countItem(bot, item.name);
   for (let attempt = 0; attempt < 2; attempt++) {
     throwIfAborted(ctx.signal);
@@ -200,14 +242,23 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
       await sleep(400); // let the inventory sync after crafting intermediates
     }
   }
-  // Explain what's missing using the first recipe's ingredient delta.
+  // Explain what's actually missing: ingredients we don't have enough of, and/or the table problem.
   const any = bot.recipesAll(item.id, null, true)[0];
   if (!any) return `no known recipe for ${item.name}`;
+  const have = (id: number): number => {
+    const n = bot.registry.items[id]?.name ?? '';
+    // any wood type counts for planks/logs
+    if (/_planks$/.test(n)) return countItem(bot, /_planks$/);
+    if (/_log$/.test(n)) return countItem(bot, /_log$/);
+    return countItem(bot, n);
+  };
   const missing = any.delta
-    .filter((d) => d.count < 0)
-    .map((d) => `${-d.count} ${genericWood(bot.registry.items[d.id]?.name ?? String(d.id))}`)
-    .join(', ');
-  return `cannot craft ${item.name}: need ${missing}${any.requiresTable ? ' + crafting table' : ''}`;
+    .filter((d) => d.count < 0 && have(d.id) < -d.count)
+    .map((d) => `${-d.count - have(d.id)} more ${genericWood(bot.registry.items[d.id]?.name ?? String(d.id))}`);
+  const problems = [...missing];
+  if (any.requiresTable && tableProblem.get(bot)) problems.push(`crafting table: ${tableProblem.get(bot)}`);
+  if (problems.length === 0) problems.push('unknown reason (try again)');
+  return `cannot craft ${item.name}: ${problems.join('; ')}`;
 }
 
 const SMELT_INPUT: Record<string, string> = {

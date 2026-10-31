@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import { milestones, progressText, type ProgressFacts } from '../src/bot/progress.js';
+
+const empty: ProgressFacts = {
+  items: {}, foodCount: 0, tableNearby: false, homeKnown: false, bedKnown: false, spareBedKnown: false,
+};
+const next = (f: ProgressFacts): string | undefined => milestones(f).find((m) => !m.done)?.id;
+
+describe('progress ladder', () => {
+  it('starts with wood', () => {
+    expect(next(empty)).toBe('wood');
+    expect(progressText(empty)).toContain('"block":"log","count":8');
+  });
+  it('walks the tech tree in order', () => {
+    expect(next({ ...empty, items: { spruce_log: 8 } })).toBe('table');
+    expect(next({ ...empty, items: { spruce_log: 6, crafting_table: 1 } })).toBe('wooden_pickaxe');
+    expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, spruce_planks: 4 } })).toBe('sword');
+    expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1 } })).toBe('stone_pickaxe');
+  });
+  it('asks for missing cobblestone before a stone pickaxe', () => {
+    const f = { ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1, cobblestone: 1 } };
+    expect(progressText(f)).toContain('need 2 more cobblestone');
+    expect(progressText({ ...f, items: { ...f.items, cobblestone: 3 } })).toContain('"item":"stone_pickaxe"');
+  });
+  it('wood stays done once tools exist, even with no logs left', () => {
+    const f = { ...empty, tableNearby: true, items: { stone_pickaxe: 1, stone_sword: 1 } };
+    expect(milestones(f).find((m) => m.id === 'wood')!.done).toBe(true);
+    expect(next(f)).toBe('food');
+  });
+  it('beds come last and need wool', () => {
+    const f: ProgressFacts = {
+      items: { stone_pickaxe: 1, stone_sword: 1, torch: 4, white_wool: 1 }, foodCount: 6, tableNearby: true,
+      homeKnown: true, bedKnown: false, spareBedKnown: false,
+    };
+    expect(next(f)).toBe('own_bed');
+    expect(progressText(f)).toContain('need 2 more wool');
+    expect(next({ ...f, bedKnown: true })).toBe('spare_bed');
+    expect(next({ ...f, bedKnown: true, spareBedKnown: true })).toBeUndefined();
+    expect(progressText({ ...f, bedKnown: true, spareBedKnown: true })).toContain('All basics done');
+  });
+});

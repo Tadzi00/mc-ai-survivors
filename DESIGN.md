@@ -31,6 +31,31 @@ Each `BotAgent` (`src/bot/agent.ts`) has two layers:
 sub-second reactions. Splitting lets a 3B model on a 6 GB GPU drive a bot without dying to every zombie,
 and keeps LLM traffic low (one call per finished skill, not per tick).
 
+### 2.1 Fight / flee policy (`reflexChoice.ts`, `agent.ts`)
+
+- Creeper: flee unless health >= 16 AND armed.
+- Armed (sword/axe): fight while health >= 10 (>= 16 if 2+ hostiles within 10 blocks).
+- Bare-handed: fight only at health >= 18 against ONE hostile; otherwise flee. Fists lose to zombies.
+- A fight runs until the target is dead or > 16 blocks away (max 40 s), retargets the next hostile
+  within 8 blocks, and when health drops below 8 it **sprints away** in the same reflex (no gap).
+- Flee sprints directly away from the average threat position until nothing is within 14 blocks
+  (max 15 s), or runs home if home is within 40 blocks.
+
+### 2.2 Progress ladder (`src/bot/progress.ts`)
+
+Every observation contains a deterministic checklist and ONE "NEXT STEP" with a ready skill call:
+wood → crafting table → pickaxe → sword → stone pickaxe → food (5) → 70 building blocks → shelter →
+heat (2 torches or a warm sealed room) → own bed → spare bed. Facts come from inventory, nearby crafting
+table, remembered places (`home`, `bed`, `spare_bed`) and the RealisticSeasons reading. Prompts tell
+both tiers to follow it unless in danger or it just failed. **Why:** small local models (3-7B) loop on
+"gather wood" without a concrete next step; computing the tech tree in code is cheap and reliable.
+
+### 2.3 Idle watchdog
+
+Every 10 s a bot checks whether it moved >= 1 block in the last 30 s (ignored while sleeping). If not,
+it logs `IDLE: ... waiting for the model / skill X not moving / doing nothing` (and a jsonl `idle`
+event), at most once a minute. Diagnostic only; it never changes behaviour.
+
 ## 3. One action per call, JSON only
 
 The model returns exactly one object: `{"thought": "...", "skill": "...", "args": {...}}`.
@@ -144,7 +169,12 @@ They may be surrounded by other output and colour codes; parsers scan for the fi
 SB|v1|beds|{"beds":[{"x":int,"y":int,"z":int,"world":str,"owner":str|null,"valid":bool,"reason":str}]}
 SB|v1|canspawn|{"canSpawn":bool,"freeValidBed":{"x","y","z","world"}|null,"missing":[str],"reason":str}
 SB|v1|assign|{"ok":bool,...}   SB|v1|unassign|{...}   SB|v1|scan|{...}   SB|v1|check|{...}
+SB|v1|grace|{"active":bool,"remainingTicks":int,"removed":int}
 ```
+
+`/survivors grace start [ticks]` (default 24000 = one day) cancels natural hostile spawns and removes
+unnamed hostiles in loaded chunks; the orchestrator calls it when it seeds bots (`population.graceOnSeed`).
+`/survivors inv <player>` (players only) opens a read-only snapshot of a bot's inventory.
 
 Positions are bed **head** blocks.
 
@@ -211,3 +241,9 @@ are not logged (size); the hash lets you spot repeated identical situations.
 - `/temp raw` "Unknown command" in the logs once at startup when RealisticSeasons is not installed.
 - The LLM sees an abbreviated observation (counts + nearest position per block type), not the world.
 - With `concurrency: 1`, bots queue for the GPU; decisions can lag behind with many bots.
+- No hostile mobs for the first Minecraft day after the bots are (re)seeded: the grace period.
+- Bare-handed bots run from zombies instead of fighting them (see 2.1).
+- The NEXT STEP hint is sometimes not the smartest move (e.g. asks for a sword before food). It is a fixed
+  ladder on purpose; smart bots may deviate.
+- `craft crafting_table` is refused when the bot already has one (it used to pile up tables).
+- After every craft the 2x2 crafting grid is emptied: leftover planks there silently became crafting tables.

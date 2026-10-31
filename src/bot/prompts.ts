@@ -29,6 +29,9 @@ export function systemPrompt(tier: Tier, name: string, chatRange: number): strin
 You choose ONE high-level action at a time; deterministic skills execute it. Do not micro-manage.
 ${RULES_FULL.replace('{chatRange}', String(chatRange))}
 
+Your observation contains PROGRESS and a NEXT STEP with a ready skill call. Do the NEXT STEP unless you are in
+danger, it just failed (then fix the reason given), or you have a better idea for the tribe.
+
 STRATEGY HINTS: wood -> planks/sticks -> crafting table -> wooden pickaxe -> stone tools. Collect ~80 blocks
 (planks/cobblestone/dirt), then build_shelter, put a bed inside (bed = 3 wool + 3 planks; wool from sheep),
 then a SPARE bed for a newborn. Store food. Keep a long-term goal with set_goal; record discoveries with remember.
@@ -41,7 +44,8 @@ ${FORMAT}`;
   }
   return `You are ${name}, a survivor bot in Minecraft. Pick ONE simple action at a time.
 ${RULES_SHORT}
-Follow your tribe's leaders and signs. Get wood, food, blocks; help build shelters and beds.
+Do the NEXT STEP shown in your observation (it is a ready skill call) unless it just failed - then fix the
+reason given. Follow your tribe's leaders and signs.
 
 SKILLS:
 ${skills}

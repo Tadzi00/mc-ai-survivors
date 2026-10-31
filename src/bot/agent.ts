@@ -59,6 +59,10 @@ export class BotAgent {
   private readonly chat: ChatLog;
   private readonly jsonl: JsonlLog;
   private running = false;
+  /** For the idle watchdog: is the bot waiting on the model right now, and where it was recently. */
+  private planningSince = 0;
+  private posHistory: Array<{ t: number; x: number; y: number; z: number }> = [];
+  private lastIdleWarn = 0;
   private dead = false;
   private skillAbort: AbortController | undefined;
   private currentSkill: string | undefined;
@@ -121,6 +125,7 @@ export class BotAgent {
       this.jsonl.write('spawn', { tier: this.tier, pos: bot.entity.position });
       this.events.onSpawn(this);
       this.timers.push(setInterval(() => void this.reflexTick(), this.deps.config.bot.reflexIntervalMs));
+      this.timers.push(setInterval(() => this.idleWatchdog(), 10_000));
       this.timers.push(setInterval(() => void this.temperatureTick(), this.deps.config.bot.temperatureCheckSeconds * 1000));
       void this.temperatureTick();
       void this.plannerLoop();
@@ -215,6 +220,67 @@ export class BotAgent {
   }
 
   // ---------------------------------------------------------------- reflexes
+  /**
+   * Warns (log + jsonl "idle") when the bot hasn't moved for 30 s and isn't sleeping, saying what it is
+   * waiting on, so stuck bots get noticed. Diagnostic only; it does not change behaviour.
+   */
+  private idleWatchdog(): void {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity) return;
+    const now = Date.now();
+    const p = bot.entity.position;
+    this.posHistory.push({ t: now, x: p.x, y: p.y, z: p.z });
+    this.posHistory = this.posHistory.filter((h) => now - h.t <= 35_000);
+    const oldest = this.posHistory[0]!;
+    if (now - oldest.t < 29_000 || bot.isSleeping) return;
+    const moved = Math.max(...this.posHistory.map((h) => Math.hypot(h.x - p.x, h.y - p.y, h.z - p.z)));
+    if (moved >= 1 || now - this.lastIdleWarn < 60_000) return;
+    this.lastIdleWarn = now;
+    const what = this.planningSince
+      ? `waiting for the model for ${Math.round((now - this.planningSince) / 1000)}s`
+      : this.reflexBusy
+        ? 'running a reflex'
+        : this.currentSkill
+          ? `skill "${this.currentSkill}" running but not moving`
+          : 'doing nothing (between actions)';
+    this.log('warn', `IDLE: hasn't moved for 30s - ${what}`);
+    this.jsonl.write('idle', { what, skill: this.currentSkill ?? null, pos: { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) } });
+  }
+
+  private hostilesWithin(radius: number): Entity[] {
+    const bot = this.bot!;
+    return Object.values(bot.entities).filter(
+      (e) => !!e.name && HOSTILE_MOBS.has(e.name) && !!e.position && e.position.distanceTo(bot.entity.position) <= radius,
+    );
+  }
+
+  /** Sprint away from nearby hostiles until none is within `safe` blocks (or time runs out). */
+  private async runAway(ctx: SkillContext, signal: AbortSignal, maxMs: number, safe = 14): Promise<string> {
+    const bot = this.bot!;
+    const end = Date.now() + maxMs;
+    bot.setControlState('sprint', true);
+    try {
+      while (Date.now() < end) {
+        const threats = this.hostilesWithin(safe);
+        if (threats.length === 0) return 'escaped';
+        const me = bot.entity.position;
+        // run directly away from the average threat position
+        let ax = 0;
+        let az = 0;
+        for (const t of threats) {
+          ax += me.x - t.position.x;
+          az += me.z - t.position.z;
+        }
+        const len = Math.max(0.1, Math.hypot(ax, az));
+        await gotoXZ(ctx, me.x + (ax / len) * 12, me.z + (az / len) * 12, 3_000).catch(() => undefined);
+        if (signal.aborted) return 'aborted';
+      }
+      return this.hostilesWithin(safe).length ? 'still chased' : 'escaped';
+    } finally {
+      bot.setControlState('sprint', false);
+    }
+  }
+
   private nearestHostile(): Entity | undefined {
     const bot = this.bot!;
     let best: Entity | undefined;
@@ -245,6 +311,7 @@ export class BotAgent {
       onFire: isOnFire(bot.entity.metadata?.[0] as unknown),
       inWater: feet?.name === 'water' || head?.name === 'water',
       hostile: hostile ? { distance: hostile.position.distanceTo(bot.entity.position), type: hostile.name ?? 'mob' } : undefined,
+      nearbyHostiles: this.hostilesWithin(10).length,
       hasWeapon: bot.inventory.items().some((i) => /_sword$|_axe$/.test(i.name)),
       isNight: bot.time.timeOfDay >= 12_600 && bot.time.timeOfDay <= 23_000,
       isSleeping: bot.isSleeping,
@@ -272,7 +339,7 @@ export class BotAgent {
       this.skillAbort.abort();
     }
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 20_000);
+    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : 25_000);
     const started = Date.now();
     let result = '';
     try {
@@ -308,30 +375,40 @@ export class BotAgent {
         if (!hostile) return 'no target';
         const weapon = bot.inventory.items().find((i) => /_sword$|_axe$/.test(i.name));
         if (weapon) await bot.equip(weapon, 'hand').catch(() => undefined);
-        void bot.pvp.attack(hostile);
-        const end = Date.now() + 12_000;
+        // Fight until the target dies or leaves; retarget to the next close hostile; bail out (and run)
+        // when health gets low. Bounded so the planner gets a turn eventually.
+        let target: Entity | undefined = hostile;
+        let kills = 0;
+        const end = Date.now() + 40_000;
         try {
-          while (Date.now() < end && hostile.isValid && bot.entities[hostile.id]) {
-            if (bot.health < 8) return 'disengaged (low health)';
-            await sleep(400, signal);
+          while (target && Date.now() < end) {
+            if (bot.health < 8) {
+              await bot.pvp.stop().catch(() => bot.pvp.forceStop());
+              return `low health after ${kills} kill(s): ${await this.runAway(ctx, signal, 15_000)}`;
+            }
+            if (bot.pvp.target !== target) void bot.pvp.attack(target);
+            await sleep(300, signal);
+            const gone = !target.isValid || !bot.entities[target.id] || target.position.distanceTo(bot.entity.position) > 16;
+            if (gone) {
+              if (!target.isValid || !bot.entities[target.id]) kills++;
+              target = this.hostilesWithin(8)[0];
+            }
           }
         } finally {
           await bot.pvp.stop().catch(() => bot.pvp.forceStop());
         }
-        return hostile.isValid ? 'fought' : 'killed';
+        return target ? `still fighting after 40s (${kills} kill(s))` : `won (${kills} kill(s))`;
       }
       case 'flee': {
         const home = this.memory.place('home');
-        if (home && home.x !== undefined) {
+        if (home && home.x !== undefined && bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) < 40) {
+          bot.setControlState('sprint', true);
           await gotoNear(ctx, home.x, home.y, home.z, 1, 15_000).catch(() => undefined);
+          bot.setControlState('sprint', false);
           return 'fled home';
         }
         if (!hostile) return 'nothing to flee';
-        const me = bot.entity.position;
-        const away = me.minus(hostile.position);
-        const len = Math.max(0.1, Math.hypot(away.x, away.z));
-        await gotoXZ(ctx, me.x + (away.x / len) * 16, me.z + (away.z / len) * 16, 8_000).catch(() => undefined);
-        return 'fled';
+        return this.runAway(ctx, signal, 15_000);
       }
       case 'eat':
         return eatSkill(ctx);
@@ -361,6 +438,7 @@ export class BotAgent {
       this.lastPlanAt = Date.now();
       let action: PlannedAction;
       try {
+        this.planningSince = Date.now();
         action = await this.plan();
       } catch (e) {
         this.log('warn', `planner error: ${(e as Error).message}`);
@@ -368,6 +446,7 @@ export class BotAgent {
         action = fallbackAction(countItem(this.bot, /_log$/));
         await sleep(5000);
       }
+      this.planningSince = 0;
       if (!this.running) break;
       await this.execute(action);
     }
