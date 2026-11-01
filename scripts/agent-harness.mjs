@@ -100,6 +100,22 @@ const scenarios = {
     return { ok: dead && survived, why: `husk killed=${dead}, bot alive=${survived}` };
   },
 
+  /** A bot with only a WOODEN sword against a husk: does it hit at all? */
+  async fight_wooden() {
+    const [a] = await startAgents([{ name: 'TestA_wood', x: X, z: Z }]);
+    await cmd(`give TestA_wood minecraft:wooden_sword 1`);
+    await sleep(1500);
+    await cmd(`summon minecraft:husk ${X + 5} ${Y} ${Z}`);
+    let dead = false;
+    for (let i = 0; i < 45 && !dead && !a.isDead; i++) {
+      await sleep(1000);
+      dead = !/passed/i.test(await cmd(`execute if entity @e[type=husk,x=${X - R},y=${Y - 3},z=${Z - R},dx=${2 * R},dy=14,dz=${2 * R}]`));
+    }
+    const hp = a.bot?.health;
+    await stopAgents([a]);
+    return { ok: dead && !a.isDead, why: `husk killed=${dead}, bot alive=${!a.isDead} hp=${hp}` };
+  },
+
   /** Low on health in a dead-end corner with a husk in the way out: it must fight back, not run into walls. */
   async cornered() {
     const [a] = await startAgents([{ name: 'TestA_corner', x: X, z: Z }]);

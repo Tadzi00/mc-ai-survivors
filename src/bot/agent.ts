@@ -1532,7 +1532,8 @@ export class BotAgent {
         // never start digging while in water: the drowning reflex can't run while this one does
         return this.deps.config.bot.nightShelter && night && !wet && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
       })(),
-      bunkeredAtDay: !!this.bunker && bot.time.timeOfDay < 12_000,
+      // Out only when the sun is properly up (zombies live a while at dawn) and no monster is near the hole.
+      bunkeredAtDay: !!this.bunker && bot.time.timeOfDay >= 1_000 && bot.time.timeOfDay < 12_000 && this.hostilesWithin(16).length === 0,
       preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),
       preyNear: this.nearestPrey(24) !== undefined,
       foodItems: this.foodItemCount(),
