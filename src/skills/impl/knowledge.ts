@@ -71,6 +71,11 @@ const PROTECTED_PLACES = new Set(['bed', 'spare_bed']);
 /** set_home: where the bot stands becomes its home (door transit, no-dig zone, warm_home reflex use it). */
 export async function setHomeSkill(ctx: SkillContext): Promise<string> {
   const p = ctx.bot.entity.position.floored();
+  // A home a player gave you stays (they can change it with /msg <bot> !home).
+  const cur = ctx.memory.place('home');
+  if (cur?.note?.startsWith('set by ') && cur.note !== 'set by me' && Math.hypot(cur.x - p.x, cur.z - p.z) > 6) {
+    return `kept your home at ${fmtPos(cur)} (${cur.note}); go there with goto {"place":"home"}`;
+  }
   let room = '';
   if (ctx.seasons.enabled) {
     const r = await ctx.seasons.room(p.x, p.y, p.z).catch(() => undefined);

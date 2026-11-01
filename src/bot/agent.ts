@@ -585,8 +585,9 @@ export class BotAgent {
       return;
     }
     if (/^!home\b/i.test(msg)) {
-      // Your position if the bot can see you, else its own.
-      const pos = bot.players[from]?.entity?.position ?? bot.entity.position;
+      // "!home x y z", else your position if the bot can see you, else its own.
+      const xyz = /^!home\s+(-?\d+)[\s,]+(-?\d+)[\s,]+(-?\d+)/i.exec(msg);
+      const pos = xyz ? v3(Number(xyz[1]), Number(xyz[2]), Number(xyz[3])) : bot.players[from]?.entity?.position ?? bot.entity.position;
       this.memory.setPlace('home', { x: pos.x, y: pos.y, z: pos.z, note: `set by ${from}` });
       delete this.memory.data.places.doorway;
       this.memory.learn(`${from} gave me a home at ${fmtPos(pos)}`);
@@ -658,7 +659,7 @@ export class BotAgent {
       return;
     }
     if (/^!/.test(msg)) {
-      reply('Commands: !think, !status, !memory, !lessons, !finds [kind], !home (here becomes my home), !teach <fact>, !forget <text or lesson number>. Anything else is a message to me.');
+      reply('Commands: !think, !status, !memory, !lessons, !finds [kind], !home [x y z] (here or there becomes my home), !teach <fact>, !forget <text or lesson number>. Anything else is a message to me.');
       return;
     }
     this.chat.offerDirect(from, msg);
@@ -1360,6 +1361,13 @@ export class BotAgent {
       clearTimeout(timer);
       this.skillAbort = undefined;
       this.currentSkill = undefined;
+    }
+    // A player's order cut short by a reflex (eat, fight, surface...) resumes afterwards (up to 3 times),
+    // instead of the model re-planning from the order text (it once took "go home" as "set home here").
+    const resumes = (action as PlannedAction & { resumes?: number }).resumes ?? 0;
+    if (/^interrupted \((?!order from|message from)/.test(result) && action.thought.startsWith('order from') && !this.forcedStep && resumes < 3) {
+      this.forcedStep = { ...action, resumes: resumes + 1 } as PlannedAction;
+      result += ' (will resume the order)';
     }
     // Tell the model what really changed (a gather that "timed out" may still have collected a lot).
     const delta = this.inventoryDelta(invBefore);
