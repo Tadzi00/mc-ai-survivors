@@ -60,6 +60,30 @@ function armorRank(name: string): number {
   return ARMOR_TIERS[name.split('_')[0]!] ?? 0;
 }
 
+/** Nearest standable spot within 6 blocks with 3 natural blocks below and a solid floor (for digBunker). */
+function findBunkerSpot(bot: Bot): Vec3 | undefined {
+  const base = bot.entity.position.floored();
+  const natural = (p: Vec3): boolean => {
+    const b = bot.blockAt(p);
+    return !!b && b.boundingBox === 'block' && !MAN_MADE_RE.test(b.name) && bot.canDigBlock(b);
+  };
+  let best: Vec3 | undefined;
+  let bestD = Infinity;
+  for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) for (const dy of [0, 1, -1]) {
+    const p = base.offset(dx, dy, dz);
+    const free = (q: Vec3): boolean => bot.blockAt(q)?.boundingBox === 'empty' && bot.blockAt(q)?.name !== 'water' && bot.blockAt(q)?.name !== 'lava';
+    if (!free(p) || !free(p.offset(0, 1, 0))) continue;
+    if (![1, 2, 3].every((k) => natural(p.offset(0, -k, 0)))) continue;
+    if (bot.blockAt(p.offset(0, -4, 0))?.boundingBox !== 'block') continue;
+    const d = p.distanceTo(base);
+    if (d < bestD) {
+      best = p;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 /** What the discovery scan looks for (label, block-name predicate). */
 const DISCOVERY_BLOCKS: Array<[string, (n: string) => boolean]> = [
   ['coal_ore', (n) => n === 'coal_ore' || n === 'deepslate_coal_ore'],
@@ -91,6 +115,8 @@ const PREY = ['cow', 'pig', 'sheep', 'chicken', 'rabbit'];
 const PREY_LABELS = new Set(PREY.map((p) => `${p}s`));
 
 const REFLEX_COOLDOWN_MS: Partial<Record<Reflex, number>> = {
+  // failures (bad ground) must not re-fire every tick: each try interrupts the current action
+  night_shelter: 45_000,
   hunt: 20_000,
   eat: 5_000,
   sleep: 60_000,
@@ -859,7 +885,7 @@ export class BotAgent {
         const t = bot.time.timeOfDay;
         const night = t >= 12_800 && t <= 23_000;
         const sky = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0;
-        return night && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
+        return this.deps.config.bot.nightShelter && night && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
       })(),
       bunkeredAtDay: !!this.bunker && bot.time.timeOfDay < 12_000,
       preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),
@@ -1014,7 +1040,15 @@ export class BotAgent {
           const sky = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0;
           if (sky < 13) return 'night: went home';
         }
-        const r = await digBunker(ctx);
+        let r = await digBunker(ctx);
+        if (!r.feet) {
+          // Ground here is bad (water, built blocks, cave below): find diggable ground nearby and try there.
+          const spot = findBunkerSpot(bot);
+          if (spot) {
+            await gotoNear(ctx, spot.x, spot.y, spot.z, 0, 15_000).catch(() => undefined);
+            r = await digBunker(ctx);
+          }
+        }
         if (r.feet) {
           this.bunker = r.feet;
           this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)

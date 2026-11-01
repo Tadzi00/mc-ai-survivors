@@ -96,6 +96,8 @@ export const ConfigSchema = z
         reflexIntervalMs: z.number().int().min(100).default(500),
         skillTimeoutSeconds: z.number().min(5).default(120),
         serverCrafting: z.boolean().default(true),
+        /** Go home / dig a bunker at night when outdoors (see DESIGN.md 6.5.4). */
+        nightShelter: z.boolean().default(true),
         scanRadius: z.number().int().min(4).max(64).default(24),
         coldThresholdC: z.number().default(5),
         temperatureCheckSeconds: z.number().min(5).default(30),

@@ -10,6 +10,8 @@ import { rmSync } from 'node:fs';
 
 const config = loadConfig();
 config.paths = { ...config.paths, state: './state/agent-test', logs: './logs/agent-test' };
+// Scenarios must not depend on the real world's time of day (bots would bunker at night).
+config.bot = { ...config.bot, nightShelter: false };
 const rcon = new RconClient(config.rcon);
 const strip = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '');
 const cmd = async (c) => strip(await rcon.send(c));
@@ -21,9 +23,17 @@ const stub = {
 };
 const llm = { forTier: () => ({ provider: stub, tier: { model: 'stub', maxTokens: 50, temperature: 0 } }) };
 
+/** /fill refuses more than 32768 blocks: clear the test area in horizontal slices. */
+async function clearArea() {
+  for (let y = Y - 5; y <= Y + 8; y += 4) {
+    const r = await cmd(`fill ${X - R} ${y} ${Z - R} ${X + R} ${Math.min(y + 3, Y + 8)} ${Z + R} minecraft:air`);
+    if (/too many|cannot/i.test(r)) console.log('clearArea:', r);
+  }
+}
+
 async function platform() {
   await cmd(`forceload add ${X - R - 4} ${Z - R - 4} ${X + R + 4} ${Z + R + 4}`);
-  await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
+  await clearArea();
   await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y - 5} ${Z + R} minecraft:bedrock`);
   await cmd(`fill ${X - R} ${Y - 4} ${Z - R} ${X + R} ${Y - 1} ${Z + R} minecraft:stone`);
   // light ceiling: no natural mob spawns on the test platform even at night
@@ -32,7 +42,7 @@ async function platform() {
 }
 async function cleanup() {
   await cmd(`kill @e[type=!player,x=${X - R},y=${Y - 3},z=${Z - R},dx=${2 * R},dy=14,dz=${2 * R}]`);
-  await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
+  await clearArea();
   await cmd(`forceload remove ${X - R - 4} ${Z - R - 4} ${X + R + 4} ${Z + R + 4}`);
 }
 
@@ -154,6 +164,29 @@ const scenarios = {
     }
     await stopAgents(agents);
     return { ok: asked && answered && heardAnswer, why: `B asked=${asked}, A answered=${answered}, B heard answer=${heardAnswer}` };
+  },
+
+  /** Dropped at the bottom of an 8-deep water shaft: must swim up and survive. */
+  async drowning() {
+    const [a] = await startAgents([{ name: 'TestA_swim', x: X, z: Z }]);
+    // 3x3 shaft of water from Y-4 up to Y+3, stone around it, open to the sky above
+    await cmd(`fill ${X - 2} ${Y - 4} ${Z - 2} ${X + 2} ${Y + 4} ${Z + 2} minecraft:stone`);
+    await cmd(`fill ${X - 1} ${Y - 4} ${Z - 1} ${X + 1} ${Y + 3} ${Z + 1} minecraft:water`);
+    await cmd(`fill ${X - 1} ${Y + 4} ${Z - 1} ${X + 1} ${Y + 4} ${Z + 1} minecraft:air`);
+    await cmd(`tp TestA_swim ${X + 0.5} ${Y - 4} ${Z + 0.5}`);
+    let alive = true;
+    let surfaced = false;
+    for (let i = 0; i < 45; i++) {
+      await sleep(1000);
+      if (a.isDead) {
+        alive = false;
+        break;
+      }
+      const p = await pos('TestA_swim');
+      if (p && p.y >= Y + 2.5) surfaced = true;
+    }
+    await stopAgents([a]);
+    return { ok: alive && surfaced, why: `alive=${alive}, reached the surface=${surfaced}` };
   },
 
   /** Player order via /tell: "build shelter" runs instantly without the model. */
