@@ -190,6 +190,16 @@ export class BotAgent {
       const seed = home ?? this.memory.place('village');
       if (seed) v.found(seed, this.name);
     }
+    // Nothing to eat and no animals anywhere near: start the village field ourselves (the model kept
+    // hunting cows that were not there until the bot starved). Hunger alone stops at half a heart on Normal,
+    // so a bot that keeps out of trouble lives to the first harvest.
+    if (!v.data.field && (bot.time.timeOfDay ?? 0) < 11_000 && !this.isApprentice() && !this.forcedStep && this.foodItemCount() === 0 &&
+        bot.food <= 10 && !this.nearestPrey(48) && Date.now() - this.lastAutoField > 20 * 60_000) {
+      this.lastAutoField = Date.now();
+      this.planQueue = [];
+      this.queueFirst({ skill: 'farm', args: { action: 'setup', crop: 'wheat' }, thought: 'order from myself: no food and no animals - start the village wheat field' });
+      this.speakLines(['No animals left around here. Starting a wheat field by the water.']);
+    }
     // The field needs looking after: by day, an idle bot near the village harvests, replants and bakes bread
     // every ~20 min (whoever gets there first; the time is shared in village.json).
     const field = v.data.field;
@@ -234,6 +244,7 @@ export class BotAgent {
   private skippedInARow = 0;
   private pendingMentee: BotAgent | undefined;
   private lastLibraryWrite = 0;
+  private lastAutoField = 0;
   private readonly lastMeeting = new Map<string, number>();
   private newsQueue: string[] = [];
   /** What this bot said lately (chatter filter). */
@@ -1208,6 +1219,42 @@ export class BotAgent {
     this.jsonl.write('picked_up_gift', { items: items.length });
   }
 
+  /** Does the water column above our head reach air (no block in the way) within 12 blocks? */
+  private clearAbove(): boolean {
+    const bot = this.bot!;
+    const p = bot.entity.position.floored();
+    for (let dy = 1; dy <= 12; dy++) {
+      const b = bot.blockAt(p.offset(0, dy, 0));
+      if (!b) return true;
+      if (b.name === 'air' || b.name === 'cave_air') return true;
+      if (b.boundingBox === 'block') return false;
+    }
+    return false;
+  }
+
+  /** Nearest air cell reachable through water/air (not through blocks), within `radius`. */
+  private nearestAir(radius: number): Vec3 | undefined {
+    const bot = this.bot!;
+    const start = bot.entity.position.floored().offset(0, 1, 0);
+    const key = (v: Vec3): string => `${v.x},${v.y},${v.z}`;
+    const seen = new Set([key(start)]);
+    const queue: Vec3[] = [start];
+    const dirs = [v3(0, 1, 0), v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(0, -1, 0)];
+    while (queue.length && seen.size < 3000) {
+      const c = queue.shift()!;
+      for (const d of dirs) {
+        const n = c.plus(d);
+        if (seen.has(key(n)) || n.distanceTo(start) > radius) continue;
+        seen.add(key(n));
+        const b = bot.blockAt(n);
+        if (!b) continue;
+        if (b.name === 'air' || b.name === 'cave_air') return n;
+        if (b.boundingBox !== 'block') queue.push(n); // water, kelp, seagrass...
+      }
+    }
+    return undefined;
+  }
+
   /** Current position (for other agents). */
   position(): Vec3 | undefined {
     return this.bot?.entity?.position;
@@ -1588,6 +1635,32 @@ export class BotAgent {
       case 'extinguish':
       case 'surface': {
         bot.pathfinder.stop();
+        // Straight up only works if the water above opens to air; under a ledge/ceiling the bot used to
+        // "swim up" into the block for 18 s and drown. Then swim to the nearest air instead, or dig up.
+        if (r === 'surface' && !this.clearAbove()) {
+          const air = this.nearestAir(10);
+          if (air) {
+            // The pathfinder cannot plan underwater: swim there by hand (face it, forward + up, sprint-swim).
+            const end = Date.now() + 5_000;
+            try {
+              while (Date.now() < end && !signal.aborted && !this.clearAbove()) {
+                await bot.lookAt(air.offset(0.5, 0.5, 0.5), true);
+                bot.setControlState('forward', true);
+                bot.setControlState('sprint', true);
+                bot.setControlState('jump', true);
+                await sleep(150);
+              }
+            } finally {
+              bot.clearControlStates();
+            }
+            if (!this.clearAbove()) return `swimming towards air at ${fmtPos(air)}`;
+          }
+          const above = bot.blockAt(bot.entity.position.floored().offset(0, 2, 0));
+          if (above && above.boundingBox === 'block' && bot.canDigBlock(above) && above.digTime(null, false, true, false, [], []) < 1500) {
+            ALLOWED_DIGS.add(digKey(above.position));
+            await bot.dig(above, true).catch(() => undefined);
+          }
+        }
         bot.setControlState('jump', true);
         bot.setControlState('forward', r !== 'surface');
         try {

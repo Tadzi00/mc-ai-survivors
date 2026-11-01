@@ -160,6 +160,24 @@ const scenarios = {
     return { ok: got > 0, why: `asked for food, received ${got} bread` };
   },
 
+  /** Under a stone ceiling in deep water: swimming straight up hits the stone; it must find the open water. */
+  async trapped() {
+    const [a] = await startAgents([{ name: 'TestA_trap', x: X, z: Z }]);
+    await cmd(`fill ${X - 1} ${Y - 4} ${Z - 1} ${X + 5} ${Y - 1} ${Z + 1} minecraft:water`);
+    await cmd(`fill ${X - 1} ${Y - 1} ${Z - 1} ${X + 2} ${Y - 1} ${Z + 1} minecraft:stone`); // ceiling over the west part
+    await cmd(`tp TestA_trap ${X + 0.5} ${Y - 4} ${Z + 0.5}`);
+    await cmd(`effect clear TestA_trap`);
+    let surfaced = false;
+    for (let i = 0; i < 45 && !a.isDead && !surfaced; i++) {
+      await sleep(1000);
+      const p = await pos('TestA_trap');
+      surfaced = !!p && p.y >= Y - 1.5 && p.x > X + 2.5;
+    }
+    const alive = !a.isDead;
+    await stopAgents([a]);
+    return { ok: alive && surfaced, why: `alive=${alive}, got out from under the ceiling=${surfaced}` };
+  },
+
   /** Starving agent with no food hunts a cow by itself. */
   async starving() {
     const [a] = await startAgents([{ name: 'TestA_food', x: X, z: Z }]);
