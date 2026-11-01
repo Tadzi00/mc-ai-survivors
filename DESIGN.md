@@ -512,6 +512,11 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots never dig blocks within 4 blocks of their home (pathfinder `exclusionAreasBreak`), so they don't
   tunnel out of their own shelter.
+- **One Movements for everything**: mineflayer-pvp and mineflayer-collectblock each create their own default
+  `Movements` and call `setMovements` on every attack/gather (dig anywhere, scaffold, no doors, no home
+  rules); later gotos kept using them. The agent sets `bot.pvp.movements` and `bot.collectBlock.movements` to
+  its own. Below everything, `bot.dig` refuses home/protected/built-area blocks outside build skills
+  (`HOME_BUILD_SKILLS`) and logs the caller (`dig_refused`).
 - **Doors in pathfinding** (`enableDoorPathing`, `bot/doors.ts`): mineflayer-pathfinder's `canOpenDoors`
   only knows fence gates, and its gate path stalls forever (the `placing` flag is never cleared after
   `useOne`). So doors were solid unbreakable blocks, no route went through a door, and bots dug a hole next

@@ -216,3 +216,15 @@ describe('forget field', () => {
     expect(n.ok && n.forget).toBe(undefined);
   });
 });
+
+import { itemMatches, resolveInChest } from '../src/skills/impl/storage.js';
+describe('chest item names', () => {
+  it('matches generic names to variants', () => {
+    expect(itemMatches('wool', 'white_wool')).toBe(true);
+    expect(itemMatches('log', 'oak_log')).toBe(true);
+    expect(itemMatches('planks', 'spruce_planks')).toBe(true);
+    expect(itemMatches('wool', 'wooden_sword')).toBe(false);
+    expect(resolveInChest('wool', [{ name: 'red_wool', count: 2 }, { name: 'white_wool', count: 64 }])).toBe('white_wool');
+    expect(resolveInChest('coal', [{ name: 'coal', count: 3 }, { name: 'charcoal', count: 9 }])).toBe('coal');
+  });
+});

@@ -81,6 +81,8 @@ function spawnBot(name) {
         return block.safe || cost >= 100 ? cost : cost + doorDigPenalty(block.position, index.doors);
       };
       bot.pathfinder.setMovements(mv);
+      bot.pvp.movements = mv;
+      bot.collectBlock.movements = mv;
       bot.pathfinder.thinkTimeout = 10_000;
       bot.pathfinder.searchRadius = 40;
       enableServerCrafting(bot, name, rcon);

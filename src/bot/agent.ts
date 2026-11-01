@@ -305,6 +305,11 @@ export class BotAgent {
         return cost + doorDigPenalty(block.position, this.manMade.doors);
       };
       bot.pathfinder.setMovements(moves);
+      // mineflayer-pvp and mineflayer-collectblock each make their OWN default Movements and switch the
+      // pathfinder to them on every attack/gather: digging anywhere, scaffolding with dirt/cobblestone, no
+      // doors, no home protection. Every later goto (even "go home") then used those until reset. Share ours.
+      (bot as unknown as { pvp: { movements: unknown } }).pvp.movements = moves;
+      (bot as unknown as { collectBlock: { movements: unknown } }).collectBlock.movements = moves;
       bot.pathfinder.thinkTimeout = 10_000; // default 5 s gave up too early in dense terrain
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = 40; // impossible targets fail fast (not in the typings)
       this.manMade.refresh(bot);

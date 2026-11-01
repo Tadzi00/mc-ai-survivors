@@ -33,7 +33,7 @@ async function openNearestChest(ctx: SkillContext, wanted: string[] = []): Promi
   if (wanted.length) {
     const me = bot.entity.position;
     const known = Object.values(ctx.memory.data.storage ?? {})
-      .filter((c) => wanted.some((w) => (c.items[w] ?? 0) > 0))
+      .filter((c) => wanted.some((w) => Object.entries(c.items).some(([k, n]) => n > 0 && itemMatches(w, k))))
       .map((c) => ({ c, d: Math.hypot(c.x - me.x, c.y - me.y, c.z - me.z) }))
       .filter((x) => x.d <= 96)
       .sort((p, q) => p.d - q.d)[0];
@@ -97,8 +97,11 @@ export async function chestTakeSkill(ctx: SkillContext, a: SkillArgsOf<'chest_ta
   try {
     const contents = chest.containerItems();
     for (const spec of a.items) {
-      const { name, count } = parseItemSpec(spec);
-      if (name === 'list' || name === '?') continue;
+      const spec0 = parseItemSpec(spec);
+      const count = spec0.count;
+      if (spec0.name === 'list' || spec0.name === '?') continue;
+      // "wool" -> white_wool, "log" -> oak_log, "planks" -> spruce_planks: the most plentiful match in the chest.
+      const name = resolveInChest(spec0.name, contents);
       const inChest = contents.filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
       if (!inChest) {
         done.push(`no ${name} in chest`);
@@ -136,4 +139,19 @@ export async function giveSkill(ctx: SkillContext, a: SkillArgsOf<'give'>): Prom
   const n = Math.min(item.count, a.count);
   await bot.toss(item.type, null, n);
   return `tossed ${n} ${item.name} to ${a.player}`;
+}
+
+/** Does chest item `have` satisfy a requested name ("wool" matches white_wool, "log" matches oak_log)? PURE. */
+export function itemMatches(want: string, have: string): boolean {
+  const w = want.toLowerCase().replace(/^minecraft:/, '').replace(/s$/, '');
+  const h = have.toLowerCase();
+  return h === want || h === w || h.endsWith(`_${w}`) || h.endsWith(`_${w}s`);
+}
+
+/** The chest item best matching a requested name: exact first, else the most plentiful variant. PURE. */
+export function resolveInChest(want: string, contents: { name: string; count: number }[]): string {
+  if (contents.some((i) => i.name === want)) return want;
+  const totals = new Map<string, number>();
+  for (const i of contents) if (itemMatches(want, i.name)) totals.set(i.name, (totals.get(i.name) ?? 0) + i.count);
+  return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? want;
 }

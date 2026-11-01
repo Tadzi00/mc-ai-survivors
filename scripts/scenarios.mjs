@@ -55,6 +55,15 @@ export const scenarios = {
     return ok(mine === 10 && /stored 15/.test(s) && /took 5/.test(t), `store: ${s} | take: ${t.slice(0, 80)} | bot has ${mine}`);
   },
 
+  // Players say "take the wool": the chest holds white_wool.
+  async chest_generic(ctx, P) {
+    await P.cmd(`setblock ${P.X + 2} ${P.Y} ${P.Z} minecraft:chest{Items:[{Slot:0b,id:"minecraft:white_wool",count:10}]}`);
+    await P.sleep(1000);
+    const r = await chestTakeSkill(ctx, { items: ['wool:3'] });
+    const have = await count(P, 'white_wool');
+    return ok(have === 3, `take: ${r} | white_wool=${have}`);
+  },
+
   async smelt(ctx, P) {
     await P.give('raw_iron', 3);
     await P.give('coal', 2);
