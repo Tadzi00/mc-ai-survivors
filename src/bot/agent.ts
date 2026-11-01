@@ -12,7 +12,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, walkStraight, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, walkStraight, emergencyHut, leaveHut, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
@@ -221,6 +221,7 @@ export class BotAgent {
   private lastConclusionAt = 0;
   private readonly lastGift = new Map<string, number>();
   private currentReflex: Reflex | undefined;
+  private reflexAbort: AbortController | undefined;
   private skippedInARow = 0;
   private pendingMentee: BotAgent | undefined;
   private lastLibraryWrite = 0;
@@ -1501,6 +1502,20 @@ export class BotAgent {
   }
 
   private async reflexTick(): Promise<void> {
+    // Out of air: nothing else matters. A 40 s fight in water used to run to its end and the bot drowned
+    // a second after it finally swam up. Cut the running reflex (and skill) so "surface" runs now.
+    const b = this.bot;
+    if (b?.entity && this.running && (b.entity as unknown as { isInWater?: boolean }).isInWater && b.oxygenLevel < 10 && this.currentReflex !== 'surface') {
+      if (this.reflexBusy) {
+        this.reflexAbort?.abort();
+        try {
+          b.pvp.forceStop();
+        } catch {
+          /* ignore */
+        }
+        b.pathfinder.stop();
+      }
+    }
     if (!this.running || this.reflexBusy || !this.bot?.entity) return;
     const hostile = this.nearestHostile();
     const choice = chooseReflex(this.reflexState(hostile));
@@ -1518,6 +1533,7 @@ export class BotAgent {
       this.skillAbort.abort();
     }
     const ac = new AbortController();
+    this.reflexAbort = ac;
     const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : ['assist', 'hunt', 'night_shelter', 'leave_bunker'].includes(choice) ? 90_000 : 25_000);
     const started = Date.now();
     let result = '';
@@ -1576,7 +1592,7 @@ export class BotAgent {
         let kills = 0;
         const end = Date.now() + 40_000;
         try {
-          while (target && Date.now() < end) {
+          while (target && Date.now() < end && !signal.aborted) {
             if (bot.health < 8) {
               await bot.pvp.stop().catch(() => bot.pvp.forceStop());
               return `low health after ${kills} kill(s): ${await this.runAway(ctx, signal, 15_000)}`;
@@ -1666,17 +1682,28 @@ export class BotAgent {
             r = await digBunker(ctx);
           }
         }
+        if (!r.feet) {
+          // No hole possible here (water next to it, built ground...): wall ourselves in instead.
+          const hut = await emergencyHut(ctx);
+          if (hut.feet) {
+            r = hut;
+            this.memory.setPlace('bunker', { ...hut.feet, note: 'hut' });
+          } else {
+            r = { why: `${r.why}; ${hut.why}` };
+          }
+        }
         if (r.feet) {
           this.bunker = r.feet;
           this.planQueue = []; // the rest of a daytime plan would walk straight back out
-          this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)
+          if (this.memory.place('bunker')?.note !== 'hut') this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)
           this.memory.learn('At night in the open, dig 3 down and seal the top: zombies cannot reach you');
           this.jsonl.write('bunker', { pos: r.feet, result: r.why });
         }
         return `night: ${r.why}`;
       }
       case 'leave_bunker': {
-        const r = await goSurface(ctx);
+        const b = this.memory.place('bunker');
+        const r = b?.note === 'hut' && this.bunker ? await leaveHut(ctx, this.bunker) : await goSurface(ctx);
         this.bunker = undefined;
         delete this.memory.data.places.bunker;
         this.memory.save();

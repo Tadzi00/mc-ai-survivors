@@ -652,3 +652,50 @@ export class LavaIndex {
     return this.cells.size;
   }
 }
+
+/**
+ * Emergency hut when no hole can be dug (water nearby, built ground...): wall in the two cells the bot
+ * stands in (4 sides at feet and head height) and put a block over its head (plus one to hold it). 10 blocks.
+ */
+export async function emergencyHut(ctx: SkillContext): Promise<{ feet?: Vec3; why: string }> {
+  const { bot } = ctx;
+  const feet = bot.entity.position.floored();
+  bot.pathfinder.stop();
+  await walkStraight(bot, feet, 1200).catch(() => false);
+  bot.clearControlStates();
+  const cells: Vec3[] = [];
+  for (const dy of [0, 1]) for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) cells.push(feet.offset(d.x, dy, d.z));
+  // the roof block needs a neighbour to be placed against: one block on top of a wall first
+  cells.push(feet.offset(1, 2, 0), feet.offset(0, 2, 0));
+  const open = cells.filter((c) => !isSolid(bot.blockAt(c)));
+  const blocks = bot.inventory.items().filter((i) => /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/.test(i.name));
+  const have = blocks.reduce((n, i) => n + i.count, 0);
+  if (have < open.length) return { why: `not enough blocks for an emergency hut (need ${open.length}, have ${have})` };
+  let placed = 0;
+  for (const c of open) {
+    const item = bot.inventory.items().find((i) => /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/.test(i.name));
+    if (item && (await placeItemAt(ctx, item, c))) placed++;
+  }
+  const left = cells.filter((c) => !isSolid(bot.blockAt(c))).length;
+  return left === 0 ? { feet, why: `walled myself in (emergency hut, ${placed} blocks)` } : { why: `emergency hut has ${left} gaps` };
+}
+
+/** Morning: open one side of the emergency hut and step out. */
+export async function leaveHut(ctx: SkillContext, feet: Vec3): Promise<string> {
+  const { bot } = ctx;
+  for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) {
+    const out = feet.offset(d.x, 0, d.z);
+    const beyond = feet.offset(d.x * 2, 0, d.z * 2);
+    if (!isSolid(bot.blockAt(beyond.offset(0, -1, 0))) || isSolid(bot.blockAt(beyond))) continue; // nowhere to step
+    for (const p of [out, out.offset(0, 1, 0)]) {
+      const b = bot.blockAt(p);
+      if (b && b.boundingBox === 'block' && bot.canDigBlock(b)) {
+        ALLOWED_DIGS.add(digKey(p));
+        await bot.dig(b, true).catch(() => undefined);
+      }
+    }
+    await walkStraight(bot, beyond, 2500).catch(() => false);
+    return `stepped out of the emergency hut at ${fmtPos(feet)}`;
+  }
+  return goSurface(ctx);
+}

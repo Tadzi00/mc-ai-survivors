@@ -525,6 +525,11 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   - *Village library* (`library_write` / `library_read`, chest in `village.json`): best lessons + finds as
     a written book; newborns read it after being taught; bots with a book and quill add to it (daytime,
     in the village, every 30 min at most).
+- **Air first**: in water with oxygen < 10, the reflex tick aborts any running reflex (a 40 s fight in
+  water drowned a bot) so `surface` runs; the fight loop honours its abort signal.
+- **Emergency hut**: when no night hole can be dug (water next to it, built ground), the bot walls itself
+  in with 10 blocks (4 sides at feet and head, roof + one support); memory place `bunker` note `hut`; in the
+  morning `leaveHut` opens one side and steps out.
 - **Food reserve & sharing**: the ladder wants 8+ food; by day with < 3 food items and an animal within 24
   blocks the `hunt` reflex stocks up. `shareSupplies` (social tick, either side, every 3 min per pair): a
   teammate with < 2 food and hunger <= 14 gets up to 6 of our food if we have >= 4; one without a pickaxe gets

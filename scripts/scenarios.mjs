@@ -6,7 +6,7 @@ import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRo
 import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
-import { digBunker } from '../dist/skills/helpers.js';
+import { digBunker, emergencyHut, leaveHut } from '../dist/skills/helpers.js';
 import { scanRoom, renderRoom } from '../dist/skills/roomPlan.js';
 import { placeBlockSkill } from '../dist/skills/impl/building.js';
 import { chestStoreSkill, chestTakeSkill } from '../dist/skills/impl/storage.js';
@@ -476,6 +476,21 @@ export const scenarios = {
     const p = ctx.bot.entity.position.floored();
     const room = JSON.parse((await P.cmd(`room raw ${p.x} ${p.y} ${p.z}`)).split('|').pop());
     return ok(/moved/.test(r) && room.sealed, `${r.slice(0, 160)} | sealed=${room.sealed}`);
+  },
+
+  // No hole possible: wall in with blocks (9), then step out in the morning.
+  async emergency_hut(ctx, P) {
+    await P.give('dirt', 16);
+    await P.sleep(800);
+    const r = await emergencyHut(ctx);
+    const f = ctx.bot.entity.position.floored();
+    let gaps = 0;
+    for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[1,1,0],[-1,1,0],[0,1,1],[0,1,-1],[0,2,0]]) {
+      if (await isBlock(P, f.x + dx, f.y + dy, f.z + dz, 'minecraft:air')) gaps++;
+    }
+    const out = r.feet ? await leaveHut(ctx, r.feet) : 'no hut';
+    const moved = ctx.bot.entity.position.floored().distanceTo(f) >= 1.5;
+    return ok(!!r.feet && gaps === 0 && moved, `${r.why} | gaps=${gaps} | ${out} | moved out=${moved}`);
   },
 
   async bunker_not_in_water(ctx, P) {
