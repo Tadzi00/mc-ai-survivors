@@ -1,3 +1,4 @@
+import { exploreSkill } from './movement.js';
 import type { Entity } from 'prismarine-entity';
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
@@ -22,6 +23,14 @@ export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): 
   return best;
 }
 
+const FOOD_ANIMALS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom'];
+
+/** Any food animal remembered within 160 blocks? */
+function rememberedPrey(ctx: SkillContext): boolean {
+  const me = ctx.bot.entity.position;
+  return (ctx.memory.data.discoveries ?? []).some((d) => FOOD_ANIMALS.some((f) => d.what === `${f}s`) && Math.hypot(d.x - me.x, d.z - me.z) <= 160);
+}
+
 export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): Promise<string> {
   const { bot } = ctx;
   // "cows" -> "cow" (only for real mob names, so player names ending in s stay intact)
@@ -32,6 +41,35 @@ export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): 
     await goSurface(ctx); // animals live on the surface
     e = nearestEntity(ctx, target, 48);
   }
+  // Hungry bots asked for "cow" again and again where there were none: any food animal will do, and if none
+  // is around, go and look for one (like gather explores).
+  const isFoodAnimal = FOOD_ANIMALS.includes(target.toLowerCase());
+  let substitute = '';
+  if (!e && isFoodAnimal) {
+    for (const alt of FOOD_ANIMALS) {
+      e = nearestEntity(ctx, alt, 48);
+      if (e) {
+        substitute = alt;
+        break;
+      }
+    }
+  }
+  if (!e && isFoodAnimal && !rememberedPrey(ctx)) {
+    const dirs = ['north', 'east', 'south', 'west'];
+    const start = Math.floor(Math.random() * 4);
+    for (let k = 0; k < 2 && !e; k++) {
+      await exploreSkill(ctx, { direction: dirs[(start + k) % 4] as 'north', distance: 56 }).catch(() => '');
+      for (const alt of [target.toLowerCase(), ...FOOD_ANIMALS]) {
+        e = nearestEntity(ctx, alt, 48);
+        if (e) {
+          substitute = alt === target.toLowerCase() ? '' : alt;
+          break;
+        }
+      }
+    }
+    if (!e) return `no animals to eat within 48 blocks even after exploring ~110 blocks; try another area, fish, or gather sweet berries / apples (oak leaves)`;
+  }
+  if (substitute) ctx.log(`no ${target} around, hunting a ${substitute} instead`);
   if (!e) {
     // Go where this animal was seen before (auto-memory), then look again.
     const me = bot.entity.position;

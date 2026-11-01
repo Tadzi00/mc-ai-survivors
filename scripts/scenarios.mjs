@@ -364,6 +364,28 @@ export const scenarios = {
     return ok(beef > 0, `health ${hp} | attack: ${r} | beef=${beef}`);
   },
 
+  // Asked for a cow where only a pig lives: any food animal will do.
+  async hunt_any(ctx, P) {
+    await P.cmd(`summon minecraft:pig ${P.X + 6} ${P.Y} ${P.Z + 2}`);
+    await P.give('stone_sword', 1);
+    await P.sleep(1000);
+    const r = await attackSkill(ctx, { target: 'cow' });
+    const pork = await count(P, 'porkchop');
+    return ok(pork > 0, `attack cow: ${r} | porkchop=${pork}`);
+  },
+
+  // "craft cooked_beef" is smelting: it must cook the beef (furnace made from cobblestone).
+  async cook_via_craft(ctx, P) {
+    await P.give('beef', 3);
+    await P.give('cobblestone', 8);
+    await P.give('oak_planks', 8);
+    await P.give('coal', 2);
+    await P.sleep(1000);
+    const r = await craftSkill(ctx, { item: 'cooked_cow', count: 3 });
+    const cooked = await count(P, 'cooked_beef');
+    return ok(cooked === 3, `${r} | cooked_beef=${cooked}`);
+  },
+
   async eat(ctx, P) {
     await P.cmd(`effect give ${P.botName} minecraft:hunger 3 255`);
     await P.sleep(3500);

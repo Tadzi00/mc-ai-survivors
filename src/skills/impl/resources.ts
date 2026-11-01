@@ -435,6 +435,12 @@ function woodAlias(bot: Bot, name: string): string {
 
 export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Promise<string> {
   const { bot } = ctx;
+  // Cooking/smelting is not crafting: "craft cooked_beef" (and "cooked_cow") never worked.
+  const want = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/^cooked_cow$/, 'cooked_beef').replace(/^cooked_pig$/, 'cooked_porkchop').replace(/^cooked_sheep$/, 'cooked_mutton');
+  if (SMELT_INPUT[want] && want !== 'stone') {
+    const r = await smeltSkill(ctx, { item: want, count: a.count });
+    return `${want} is smelted, not crafted: ${r}`;
+  }
   // Models sometimes write "stone_pickaxe,1", "2 torch", "Stone Pickaxe x1".
   const raw = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/[\s,]*(x\s*)?\d+\s*$/, '').replace(/^\d+\s*x?\s*/, '').trim().replace(/\s+/g, '_');
   const item = bot.registry.itemsByName[woodAlias(bot, raw)];
@@ -539,8 +545,10 @@ const SMELT_INPUT: Record<string, string> = {
 
 export async function smeltSkill(ctx: SkillContext, a: SkillArgsOf<'smelt'>): Promise<string> {
   const { bot } = ctx;
-  let inputName = a.item.toLowerCase();
+  let inputName = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/^raw_(beef|porkchop|mutton|chicken|rabbit|cod|salmon)$/, '$1').replace(/^cooked_cow$/, 'cooked_beef');
   if (SMELT_INPUT[inputName]) inputName = SMELT_INPUT[inputName]!;
+  // "smelt meat"/"food": whatever raw meat we carry
+  if (/^(meat|food|raw_meat)$/.test(inputName)) inputName = findItem(bot, /^(beef|porkchop|mutton|chicken|rabbit|cod|salmon)$/)?.name ?? inputName;
   if (inputName === 'oak_log') inputName = findItem(bot, /_log$/)?.name ?? 'oak_log';
   const input = findItem(bot, inputName);
   if (!input) return `no ${inputName} in inventory to smelt`;
