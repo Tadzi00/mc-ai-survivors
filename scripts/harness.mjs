@@ -69,6 +69,8 @@ function spawnBot(name) {
         return home && Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4 ? 1000 : 0;
       });
       bot.pathfinder.setMovements(mv);
+      bot.pathfinder.thinkTimeout = 10_000;
+      bot.pathfinder.searchRadius = 40;
       enableServerCrafting(bot, name, rcon);
       resolve(bot);
     });

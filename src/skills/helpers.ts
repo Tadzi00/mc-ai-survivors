@@ -429,3 +429,35 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   const ok = await placeItemAt(ctx, cover, d1);
   return { feet: d3, why: ok ? 'dug in and sealed the top' : 'dug in but could not seal the top' };
 }
+
+/**
+ * Positions of man-made blocks around the bot, refreshed by a periodic scan. Lets the pathfinder's
+ * "don't dig next to buildings" rule use set lookups: reading 6 neighbour blocks per candidate made path
+ * planning time out ("took too long to decide path") in leafy jungles.
+ */
+export class ManMadeIndex {
+  private cells = new Set<string>();
+  private ids: Set<number> | undefined;
+
+  refresh(bot: Bot, radius = 48): void {
+    this.ids ??= new Set(Object.values(bot.registry.blocksByName).filter((b) => MAN_MADE_RE.test(b.name)).map((b) => b.id));
+    const ids = this.ids;
+    const found = bot.findBlocks({ matching: (b) => ids.has(b.type), maxDistance: radius, count: 4000 });
+    this.cells = new Set(found.map((p) => `${p.x},${p.y},${p.z}`));
+  }
+
+  /** True if `p` or one of its 6 neighbours is a known man-made block. */
+  touches(p: { x: number; y: number; z: number }): boolean {
+    if (this.cells.size === 0) return false;
+    const { x, y, z } = p;
+    return (
+      this.cells.has(`${x},${y},${z}`) ||
+      this.cells.has(`${x + 1},${y},${z}`) ||
+      this.cells.has(`${x - 1},${y},${z}`) ||
+      this.cells.has(`${x},${y + 1},${z}`) ||
+      this.cells.has(`${x},${y - 1},${z}`) ||
+      this.cells.has(`${x},${y},${z + 1}`) ||
+      this.cells.has(`${x},${y},${z - 1}`)
+    );
+  }
+}

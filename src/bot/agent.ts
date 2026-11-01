@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
@@ -155,6 +155,7 @@ export class BotAgent {
   private forcedStep: PlannedAction | undefined;
   /** Feet position of tonight's emergency bunker (cleared after leaving it in the morning). */
   private bunker: Vec3 | undefined;
+  private readonly manMade = new ManMadeIndex();
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
   /** A player's instruction that stays at the top of the observation for a while. */
@@ -236,12 +237,9 @@ export class BotAgent {
       moves.exclusionAreasBreak.push((block: { name: string; position: Vec3 }) => {
         const p = block.position;
         // never dig through buildings: protected areas, man-made blocks, or blocks touching them
+        // (set lookups via the periodically refreshed index: per-candidate block reads timed out paths)
         if (this.deps.protectedAreas?.contains(p)) return 1000;
-        if (MAN_MADE_RE.test(block.name)) return 1000;
-        for (const [dx, dy, dz] of FACE_OFFSETS) {
-          const n = bot.blockAt(p.offset(dx, dy, dz));
-          if (n && MAN_MADE_RE.test(n.name)) return 1000;
-        }
+        if (this.manMade.touches(p)) return 1000;
         // any bot's home (not just ours): a visitor must use the door too
         const homes = [this.memory.place('home'), ...(this.deps.homes?.all() ?? [])];
         for (const home of homes) {
@@ -250,6 +248,12 @@ export class BotAgent {
         return 0;
       });
       bot.pathfinder.setMovements(moves);
+      bot.pathfinder.thinkTimeout = 10_000; // default 5 s gave up too early in dense terrain
+      (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = 40; // impossible targets fail fast (not in the typings)
+      this.manMade.refresh(bot);
+      this.timers.push(setInterval(() => {
+        if (this.bot?.entity) this.manMade.refresh(this.bot);
+      }, 5_000));
       this.running = true;
       this.lastHealth = bot.health;
       this.log('info', `spawned at ${bot.entity.position.floored().toString()}`);

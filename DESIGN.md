@@ -439,6 +439,15 @@ when it dies (respawned test bots would wander the real world). Scenarios: fight
 Findings: alive answers waited for the 3 s tick (now immediate); far shouts with unknown speaker position
 were assumed in range (now the coordinates in the shout give the distance).
 
+### 12.3 Pathfinding limits
+
+In dense jungle (2x2 trunks, leaves, vines) mineflayer-pathfinder often can't plan a path within its think
+timeout ("Took to long to decide path to goal!" - their typo) no matter the rules. Mitigations: think
+timeout 10 s, search radius 40 (impossible targets fail fast), gather prefers logs with a free standing spot
+beside them and skips a whole tree (logs within 4 blocks) after a planning failure, then explores away.
+The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made block positions refreshed every
+5 s) instead of reading 6 neighbours per candidate block.
+
 ## 13. Not bugs
 
 - A bot that dies **never comes back**, and its name is never reused.

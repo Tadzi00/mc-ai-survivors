@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isUnderground, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isStandable, isUnderground, v3, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -28,9 +28,16 @@ function unreachableFor(bot: Bot): Map<string, number> {
   return m;
 }
 const posKey = (b: Block): string => `${b.position.x},${b.position.y},${b.position.z}`;
-/** Distance, plus a heavy penalty for blocks well above our feet (canopy logs, cliff faces). */
+/**
+ * Distance, plus a heavy penalty for blocks well above our feet (canopy logs, cliff faces), and a penalty
+ * for blocks with no free spot to stand right next to them (buried in leaves/rock: paths often time out).
+ */
 function targetCost(bot: Bot, b: Block, feetY: number): number {
-  return bot.entity.position.distanceTo(b.position) + 4 * Math.max(0, b.position.y - feetY - 2);
+  const p = b.position;
+  const standNext = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].some(
+    (o) => isStandable(bot, p.plus(o)) || isStandable(bot, p.plus(o).offset(0, -1, 0)),
+  );
+  return bot.entity.position.distanceTo(p) + 4 * Math.max(0, p.y - feetY - 2) + (standNext ? 0 : 12);
 }
 
 export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): Promise<string> {
@@ -131,6 +138,12 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
         if (ctx.signal.aborted) throw new AbortError();
         failures++;
         skip.set(posKey(target), Date.now() + SKIP_MS);
+        if (/to+ long to decide|no path/i.test((e as Error).message)) { // mineflayer says "Took to long"
+          // the pathfinder can't plan to this spot: skip the whole tree/cluster, not just one block
+          for (const b of findBlocks(bot, names, 64, 64)) {
+            if (b.position.distanceTo(target.position) <= 4) skip.set(posKey(b), Date.now() + SKIP_MS);
+          }
+        }
         // Never await cancelTask: it waits for the task to wind down and can hang if pathfinding is stuck.
         void bot.collectBlock.cancelTask().catch(() => undefined);
         bot.pathfinder.stop();
