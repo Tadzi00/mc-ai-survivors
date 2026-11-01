@@ -2,7 +2,7 @@
 // returns { ok, why }. The bot stands at (X, Y, Z) on a stone platform at Y-1. Check results via P.cmd (RCON).
 import { writeSignSkill, readSignsSkill, writeBookSkill, readBookSkill } from '../dist/skills/impl/knowledge.js';
 import { smeltSkill, gatherSkill, craftSkill } from '../dist/skills/impl/resources.js';
-import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill } from '../dist/skills/impl/building.js';
+import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill, buildShelterSkill } from '../dist/skills/impl/building.js';
 import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
@@ -257,6 +257,19 @@ export const scenarios = {
     const out = await goSurfaceSkill(ctx);
     const sky = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
     return ok(feetY === Y - 3 && sealed && sky >= 13, `${r.why} | feet y=${feetY} (want ${Y - 3}) sealed=${sealed} | morning: ${out} sky=${sky}`);
+  },
+
+  async shelter_relocate(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`setblock ${X + 1} ${Y} ${Z} minecraft:oak_planks`); // "something built" inside the outline
+    await P.give('cobblestone', 128);
+    await P.give('oak_planks', 12);
+    await P.give('torch', 6);
+    await P.sleep(6000); // RealisticSeasons' outside cache (RCON blocks fire no events)
+    const r = await buildShelterSkill(ctx, { size: 5 });
+    const p = ctx.bot.entity.position.floored();
+    const room = JSON.parse((await P.cmd(`room raw ${p.x} ${p.y} ${p.z}`)).split('|').pop());
+    return ok(/moved/.test(r) && room.sealed, `${r.slice(0, 160)} | sealed=${room.sealed}`);
   },
 
   async ore_bonus(ctx, P) {

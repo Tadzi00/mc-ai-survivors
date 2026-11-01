@@ -4,7 +4,7 @@ import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import {
-  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, placeItemAt, v3, type Vec3,
+  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, nearestStandable, placeItemAt, v3, type Vec3,
 } from '../helpers.js';
 import { craftSkill } from './resources.js';
 
@@ -51,7 +51,29 @@ function pickBuildingItem(ctx: SkillContext): Item | undefined {
  * Deterministic shelter template centred on the bot: square footprint `size` (outer), walls 3 high,
  * flat roof, a door in the south wall, a torch inside. Existing solid blocks are reused.
  */
+/** Builds a shelter here, or, if this spot is unsuitable (built stuff / solid hill), at up to 4 spots ~7 blocks away. */
 export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build_shelter'>): Promise<string> {
+  const first = await buildShelterHere(ctx, a);
+  if (!/^(too enclosed|something built is in the way)/.test(first)) return first;
+  const { bot } = ctx;
+  const start = bot.entity.position.floored();
+  const step = a.size + 2;
+  for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]] as const) {
+    throwIfAborted(ctx.signal);
+    const target = nearestStandable(bot, start.offset(dx, 0, dz), 3);
+    if (!target) continue;
+    try {
+      await gotoNear(ctx, target.x, target.y, target.z, 0, 20_000);
+    } catch {
+      continue;
+    }
+    const r = await buildShelterHere(ctx, a);
+    if (!/^(too enclosed|something built is in the way)/.test(r)) return `${r} (moved ${dx},${dz} from the first spot: ${first.split(';')[0]})`;
+  }
+  return `${first}; tried 4 spots around too - explore to open flat ground and retry`;
+}
+
+async function buildShelterHere(ctx: SkillContext, a: SkillArgsOf<'build_shelter'>): Promise<string> {
   const { bot } = ctx;
   const s = a.size;
   const origin = bot.entity.position.floored();
