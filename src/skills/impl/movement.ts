@@ -3,6 +3,7 @@ import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import { fmtPos, gotoNear, gotoXZ } from '../helpers.js';
+import { goSurface, isUnderground } from '../helpers.js';
 
 const { goals } = pathfinderPkg;
 
@@ -31,6 +32,11 @@ export async function gotoSkill(ctx: SkillContext, a: SkillArgsOf<'goto'>): Prom
 }
 
 export async function exploreSkill(ctx: SkillContext, a: SkillArgsOf<'explore'>): Promise<string> {
+  // Exploring through caves fails ("took too long to decide path"): get to the surface first.
+  if (isUnderground(ctx.bot)) {
+    const r = await goSurface(ctx);
+    if (isUnderground(ctx.bot)) return `underground and could not explore: ${r}`;
+  }
   const names = Object.keys(DIRS);
   const dir = a.direction ?? names[Math.floor(Math.random() * names.length)]!;
   const [dx, dz] = DIRS[dir]!;
@@ -62,4 +68,8 @@ export async function followSkill(ctx: SkillContext, a: SkillArgsOf<'follow'>): 
     bot.pathfinder.setGoal(null);
   }
   return `followed ${a.player} for ${a.seconds}s`;
+}
+
+export async function goSurfaceSkill(ctx: SkillContext): Promise<string> {
+  return goSurface(ctx);
 }

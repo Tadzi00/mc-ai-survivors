@@ -5,7 +5,7 @@ import { smeltSkill, gatherSkill, craftSkill } from '../dist/skills/impl/resourc
 import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill } from '../dist/skills/impl/building.js';
 import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
-import { gotoSkill } from '../dist/skills/impl/movement.js';
+import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
 import { chestStoreSkill, chestTakeSkill } from '../dist/skills/impl/storage.js';
 
 const count = async (P, item) => Number(/Found (\d+)/.exec(await P.cmd(`clear ${P.botName} minecraft:${item} 0`))?.[1] ?? 0);
@@ -225,6 +225,23 @@ export const scenarios = {
     await P.cmd(`fill ${X} ${Y - 2} ${Z - 2} ${X + 88} ${Y + 7} ${Z + 2} minecraft:air`);
     await P.cmd(`forceload remove ${X} ${Z - 8} ${X + 96} ${Z + 8}`);
     return ok(got >= 2 && /walked to trees/.test(r), `${r} | oak_log=${got}`);
+  },
+
+  async go_surface(ctx, P) {
+    const { X, Y, Z } = P;
+    // bot sealed in a stone block: 9x9 wide, roof 8 blocks up, small air pocket around it
+    await P.cmd(`fill ${X - 4} ${Y} ${Z - 4} ${X + 4} ${Y + 8} ${Z + 4} minecraft:stone`);
+    await P.cmd(`fill ${X - 1} ${Y} ${Z - 1} ${X + 1} ${Y + 2} ${Z + 1} minecraft:air`);
+    await P.give('stone_pickaxe', 1);
+    // the client only gets fresh light data for the RCON-filled area after reloading the chunks
+    await P.cmd(`tp ${P.botName} ${X + 600} ${Y + 20} ${Z}`);
+    await P.sleep(3000);
+    await P.cmd(`tp ${P.botName} ${X + 0.5} ${Y} ${Z + 0.5}`);
+    await P.sleep(4000);
+    const before = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
+    const r = await goSurfaceSkill(ctx);
+    const after = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
+    return ok(after >= 13, `${r} | sky light ${before} -> ${after}`);
   },
 
   async ore_bonus(ctx, P) {

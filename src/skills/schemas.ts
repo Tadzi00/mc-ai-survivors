@@ -21,6 +21,7 @@ export const SkillArgs = {
     .refine((a) => a.place !== undefined || (a.x !== undefined && a.z !== undefined), {
       message: 'give x,y,z coordinates or a remembered place name',
     }),
+  go_surface: z.object({}).passthrough(),
   explore: z.object({
     direction: z.enum(['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest']).optional(),
     // clamp, don't reject: 10-block hops found nothing new, and a rejected reply costs another model call
@@ -78,6 +79,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   craft: 'craft {item,count} uses/places a crafting table automatically; makes planks/sticks if needed',
   smelt: 'smelt {item,count,fuel?} in a furnace, item = input or product (raw_iron or iron_ingot)',
   goto: 'goto {x,y,z} or {place} (a remembered place name like "home", "bed", "chest")',
+  go_surface: 'go_surface {} get out of a cave/underground back to open sky (trees and animals live on the surface)',
   explore: 'explore {direction?,distance?} walk into unknown terrain',
   follow: 'follow {player,seconds} follow a HUMAN player (not other bots)',
   attack: 'attack {target} mob type (e.g. "zombie", "cow") or player name',

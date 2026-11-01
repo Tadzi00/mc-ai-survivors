@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, gotoNear, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, isUnderground, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -44,6 +44,10 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   const bonus: Record<string, number> = {};
   const onAbort = (): void => void bot.collectBlock.cancelTask().catch(() => undefined);
   ctx.signal.addEventListener('abort', onAbort, { once: true });
+  if (names.every((n) => /_log$|_stem$/.test(n)) && isUnderground(bot)) {
+    const r = await goSurface(ctx); // trees don't grow in caves
+    if (isUnderground(bot)) return `no trees underground; tried to reach the surface: ${r}`;
+  }
   const skip = unreachableFor(bot);
   let travelled = '';
   const wantLogs = names.every((n) => /_log$|_stem$/.test(n));

@@ -5,7 +5,7 @@ import { farmSkill } from './impl/farm.js';
 import {
   checkTemperatureSkill, markPlaceSkill, setHomeSkill, readBookSkill, readSignsSkill, rememberSkill, saySkill, shoutSkill, setGoalSkill, waitSkill, writeBookSkill, writeSignSkill,
 } from './impl/knowledge.js';
-import { exploreSkill, followSkill, gotoSkill } from './impl/movement.js';
+import { exploreSkill, followSkill, goSurfaceSkill, gotoSkill } from './impl/movement.js';
 import { craftSkill, gatherSkill, smeltSkill } from './impl/resources.js';
 import { chestStoreSkill, chestTakeSkill, giveSkill } from './impl/storage.js';
 import { attackSkill, eatSkill, sleepSkill } from './impl/survival.js';
@@ -18,6 +18,7 @@ export const SKILLS: Registry = {
   smelt: smeltSkill,
   goto: gotoSkill,
   explore: exploreSkill,
+  go_surface: goSurfaceSkill,
   follow: followSkill,
   attack: attackSkill,
   eat: eatSkill,

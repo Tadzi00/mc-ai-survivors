@@ -348,3 +348,49 @@ export async function walkStraight(bot: Bot, to: Vec3, ms: number): Promise<bool
     bot.setControlState('forward', false);
   }
 }
+
+/** Sky light at head height: 15 = open sky, under ~6 = cave/closed room. */
+export function skyLightAt(bot: Bot): number {
+  return bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 15;
+}
+
+export function isUnderground(bot: Bot): boolean {
+  return skyLightAt(bot) < 6 && bot.entity.position.y < 62;
+}
+
+/**
+ * Get back to open sky: walk to the nearest air block with full sky light within 48 blocks, otherwise dig
+ * upward in 8-block steps (the pathfinder may dig stairs; no pillaring). Returns a short result.
+ */
+export async function goSurface(ctx: SkillContext): Promise<string> {
+  const { bot } = ctx;
+  if (skyLightAt(bot) >= 13) return 'already under open sky';
+  const air = ['air', 'cave_air'].map((n) => bot.registry.blocksByName[n]?.id).filter((x): x is number => x !== undefined);
+  const open = bot.findBlocks({
+    matching: (b) => air.includes(b.type),
+    useExtraInfo: (b: Block) => b.skyLight >= 14 && isSolid(bot.blockAt(b.position.offset(0, -1, 0))),
+    maxDistance: 48,
+    count: 1,
+  })[0];
+  if (open) {
+    try {
+      await gotoNear(ctx, open.x, open.y, open.z, 1, 90_000);
+    } catch (e) {
+      if (ctx.signal.aborted) throw new AbortError();
+    }
+    if (skyLightAt(bot) >= 13) return `reached open sky at ${fmtPos(bot.entity.position)}`;
+  }
+  for (let i = 0; i < 8 && skyLightAt(bot) < 13; i++) {
+    throwIfAborted(ctx.signal);
+    const y = Math.floor(bot.entity.position.y) + 8;
+    try {
+      await withTimeout(bot.pathfinder.goto(new goals.GoalY(y)), 45_000, 'surface');
+    } catch {
+      if (ctx.signal.aborted) throw new AbortError();
+      break;
+    }
+  }
+  return skyLightAt(bot) >= 13
+    ? `reached open sky at ${fmtPos(bot.entity.position)}`
+    : `still underground at ${fmtPos(bot.entity.position)} (sky light ${skyLightAt(bot)}); try go_surface again or mine upward`;
+}

@@ -13,6 +13,8 @@ export interface ProgressFacts {
   spareBedKnown: boolean;
   /** A bed block seen within 24 blocks (may be free to claim). */
   bedNear?: { x: number; y: number; z: number };
+  /** In a cave / deep underground (no sky). */
+  underground?: boolean;
   /** Current food bar 0-20 (optional). */
   hunger?: number;
   /** true when the bot is in a sealed, comfortable room (from RealisticSeasons), undefined if unknown */
@@ -144,6 +146,10 @@ export function progressText(f: ProgressFacts): string {
     if (next) next = { ...next, label: `FOOD - you are hungry (${f.hunger}/20) and have nothing to eat` };
   }
   const line = ms.map((m) => `${m.done ? '[x]' : '[ ]'} ${m.label}`).join('  ');
+  // Wood and animals are on the surface: from a cave, the first step is always to get out.
+  if (next && f.underground && ['wood', 'food', 'table', 'own_bed', 'spare_bed'].includes(next.id)) {
+    return `PROGRESS: ${line}\nNEXT STEP (${next.label}): you are UNDERGROUND - first {"skill":"go_surface","args":{}}, then ${next.hint}`;
+  }
   if (!next) return `PROGRESS: ${line}\nAll basics done. Keep food stocked, help teammates, write signs/books with what you learned.`;
   return `PROGRESS: ${line}\nNEXT STEP (${next.label}): ${next.hint}`;
 }

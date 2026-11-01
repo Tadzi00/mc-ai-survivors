@@ -60,3 +60,10 @@ describe('bed claiming', () => {
     expect(progressText(f)).toContain('there is a bed at 1,64,2');
   });
 });
+
+describe('underground', () => {
+  it('tells a bot in a cave to go to the surface before getting wood', () => {
+    expect(progressText({ ...empty, underground: true })).toContain('"skill":"go_surface"');
+    expect(progressText({ ...empty })).not.toContain('go_surface');
+  });
+});

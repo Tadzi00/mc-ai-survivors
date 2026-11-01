@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer';
 import type { SeasonsReading } from '../contracts.js';
 import type { Tier } from '../lifecycle/policy.js';
-import { findBlocks, fmtPos, HOSTILE_MOBS } from '../skills/helpers.js';
+import { findBlocks, fmtPos, HOSTILE_MOBS, isUnderground } from '../skills/helpers.js';
 import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
 import type { Memory } from './memory.js';
 import { progressText } from './progress.js';
@@ -199,6 +199,7 @@ function progressFor(o: ObservationInput): string {
       return b ? { x: b.position.x, y: b.position.y, z: b.position.z } : undefined;
     })(),
     hunger: bot.food,
+    underground: isUnderground(bot),
     warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
   });
 }

@@ -2,7 +2,7 @@ import type { Entity } from 'prismarine-entity';
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { fmtPos, gotoNear, isStandable, nearestBlock, v3 } from '../helpers.js';
+import { fmtPos, goSurface, gotoNear, isStandable, isUnderground, nearestBlock, v3 } from '../helpers.js';
 
 export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): Entity | undefined {
   const { bot } = ctx;
@@ -28,6 +28,10 @@ export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): 
   const singular = a.target.toLowerCase().replace(/s$/, '');
   const target = !bot.registry.entitiesByName[a.target.toLowerCase()] && bot.registry.entitiesByName[singular] ? singular : a.target;
   let e = nearestEntity(ctx, target, 48);
+  if (!e && isUnderground(bot) && bot.registry.entitiesByName[target.toLowerCase()]?.category === 'Passive mobs') {
+    await goSurface(ctx); // animals live on the surface
+    e = nearestEntity(ctx, target, 48);
+  }
   if (!e) {
     // Go where this animal was seen before (auto-memory), then look again.
     const me = bot.entity.position;
