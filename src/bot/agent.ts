@@ -221,6 +221,7 @@ export class BotAgent {
     const mine = this.memory.place('village');
     if (v.center && (!mine || mine.x !== v.center.x || mine.z !== v.center.z)) this.memory.setPlace('village', { ...v.center, note: 'the village' });
     this.adoptShelters();
+    this.clearDoorways();
     if (!home || v.buildingAt(home)) return;
     const me = bot.entity.position.floored();
     if (Math.hypot(me.x - home.x, me.z - home.z) > 6) return;
@@ -276,6 +277,38 @@ export class BotAgent {
       this.memory.setPlace('home', { ...mine.center, note: 'a shelter I found' });
       this.memory.learn(`My home is the shelter at ${fmtPos(mine.center)} (walls, roof, torch): beds go inside`);
       this.log('info', `moved into the shelter at ${fmtPos(mine.center)}`);
+    }
+  }
+
+  /**
+   * A door blocked from the inside (a block placed in the cell in front of it) shuts the bot in for good: it
+   * "explored" for minutes without moving. Clear any solid non-furniture block standing in a doorway cell.
+   */
+  private clearDoorways(): void {
+    const bot = this.bot;
+    if (!bot?.entity || this.reflexBusy) return;
+    const room = scanRoom(bot, bot.entity.position.floored());
+    if (!room) return;
+    const inRoom = new Set(room.cells.map((c) => `${c.x},${c.z}`));
+    // the room scan stops at the blocking block, so it never "sees" that door: look for doors around the room
+    const nearDoors = bot
+      .findBlocks({ matching: (b) => b.name.endsWith('_door') && (b.getProperties() as { half?: string }).half === 'lower', maxDistance: 8, count: 8 })
+      .filter((p) => p.y === room.y && p.x >= room.x0 - 2 && p.x <= room.x1 + 2 && p.z >= room.z0 - 2 && p.z <= room.z1 + 2);
+    for (const d of [...room.doors, ...nearDoors]) {
+      for (const o of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) {
+        const c = d.plus(o);
+        // only the cell straight in front of the door, on the inside: one more step in the same direction is
+        // a room cell (the wall blocks beside the door are never touched)
+        if (!inRoom.has(`${c.x + o.x},${c.z + o.z}`)) continue;
+        for (const p of [c, c.offset(0, 1, 0)]) {
+          const b = bot.blockAt(p);
+          if (!b || b.boundingBox !== 'block' || /_bed$|chest|crafting_table|furnace|barrel|_door$/.test(b.name)) continue;
+          ALLOWED_DIGS.add(digKey(p));
+          void bot.dig(b, true).catch(() => undefined);
+          this.log('info', `cleared ${b.name} blocking the door at ${fmtPos(d)} from the inside`);
+          return;
+        }
+      }
     }
   }
 

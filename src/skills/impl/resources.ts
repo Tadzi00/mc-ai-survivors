@@ -50,7 +50,7 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   const { bot } = ctx;
   const q = a.block.toLowerCase().replace(/^minecraft:/, '');
   // "gather cow": animals are hunted, not gathered
-  if (/^(cows?|pigs?|sheep|chickens?|rabbits?|beef|porkchop|mutton|meat|food)$/.test(q)) {
+  if (/^(cows?|pigs?|sheep|chickens?|rabbits?|meat|food)$/.test(q) || /beef|pork|mutton|chicken|rabbit|steak/.test(q)) {
     const animal = /pig|pork/.test(q) ? 'pig' : /sheep|mutton/.test(q) ? 'sheep' : /chicken/.test(q) ? 'chicken' : /rabbit/.test(q) ? 'rabbit' : 'cow';
     return `animals are hunted, not gathered: ${await attackSkill(ctx, { target: animal })}`;
   }

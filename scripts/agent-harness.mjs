@@ -151,6 +151,25 @@ const scenarios = {
     return { ok: alive && out, why: `alive=${alive}, climbed out the side shaft=${out}` };
   },
 
+  /** A block placed right inside the door shut the bot in: it clears that block (never the walls). */
+  async blocked_door() {
+    await cmd(`fill ${X - 2} ${Y - 1} ${Z - 2} ${X + 2} ${Y + 3} ${Z + 2} minecraft:stone hollow`);
+    await cmd(`setblock ${X} ${Y} ${Z + 2} minecraft:oak_door[half=lower,facing=south]`);
+    await cmd(`setblock ${X} ${Y + 1} ${Z + 2} minecraft:oak_door[half=upper,facing=south]`);
+    await cmd(`setblock ${X} ${Y} ${Z + 1} minecraft:spruce_planks`); // blocks the doorway from the inside
+    await cmd(`setblock ${X - 1} ${Y + 1} ${Z - 1} minecraft:wall_torch[facing=east]`);
+    const [a] = await startAgents([{ name: 'TestA_door', x: X, z: Z }]);
+    await cmd(`tp TestA_door ${X + 0.5} ${Y} ${Z - 0.5}`);
+    let cleared = false;
+    for (let i = 0; i < 30 && !cleared; i++) {
+      await sleep(1000);
+      cleared = /passed/i.test(await cmd(`execute if block ${X} ${Y} ${Z + 1} minecraft:air`));
+    }
+    const walls = /passed/i.test(await cmd(`execute if block ${X - 1} ${Y} ${Z + 2} minecraft:stone`)) && /passed/i.test(await cmd(`execute if block ${X + 1} ${Y} ${Z + 2} minecraft:stone`));
+    await stopAgents([a]);
+    return { ok: cleared && walls, why: `doorway cleared=${cleared}, walls beside the door intact=${walls}` };
+  },
+
   /** A bot with only a WOODEN sword against a husk: does it hit at all? */
   async fight_wooden() {
     const [a] = await startAgents([{ name: 'TestA_wood', x: X, z: Z }]);
