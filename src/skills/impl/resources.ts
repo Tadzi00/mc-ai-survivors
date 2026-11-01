@@ -406,7 +406,9 @@ function woodAlias(bot: Bot, name: string): string {
 
 export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Promise<string> {
   const { bot } = ctx;
-  const item = bot.registry.itemsByName[woodAlias(bot, a.item.toLowerCase().replace(/^minecraft:/, ''))];
+  // Models sometimes write "stone_pickaxe,1", "2 torch", "Stone Pickaxe x1".
+  const raw = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/[\s,]*(x\s*)?\d+\s*$/, '').replace(/^\d+\s*x?\s*/, '').trim().replace(/\s+/g, '_');
+  const item = bot.registry.itemsByName[woodAlias(bot, raw)];
   if (!item) return `unknown item "${a.item}"`;
   if (item.name === 'crafting_table') {
     const have = countItem(bot, 'crafting_table');

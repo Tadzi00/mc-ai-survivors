@@ -171,3 +171,35 @@ describe('doorDigPenalty', () => {
     expect(doorDigPenalty({ x: 10, y: 64, z: 10 }, [])).toBe(0);
   });
 });
+
+import { cleanLesson, isLessonWorthy, tidyLessons } from '../src/bot/memory.js';
+describe('lesson hygiene', () => {
+  it('strips copied labels', () => {
+    expect(cleanLesson('- Conclusion: Split tasks')).toBe('Split tasks');
+    expect(cleanLesson('Conclusion: - Conclusion: Hunt cows')).toBe('Hunt cows');
+  });
+  it('rejects to-dos, keeps facts', () => {
+    expect(isLessonWorthy('Need to hunt a cow and craft a wooden pickaxe.')).toBe(false);
+    expect(isLessonWorthy("Follow TAdzi00's instructions for survival tasks.")).toBe(false);
+    expect(isLessonWorthy('- Need to gather logs and craft a pickaxe before building a shelter.')).toBe(false);
+    expect(isLessonWorthy('Cows live on grass under open sky, not in caves')).toBe(true);
+  });
+  it('tidies an old list: duplicates merged, failures and mentor kept', () => {
+    const t = tidyLessons([
+      'Surv_72 is my mentor; ask them when unsure',
+      'Conclusion: Splitting tasks is efficient: one gathers wood, one mines iron.',
+      'Conclusion: Split tasks: one hunts, one mines.',
+      'Conclusion: - Conclusion: Splitting tasks: one hunts, one explores for resources.',
+      'Conclusion: Logs are essential for crafting and tool making.',
+      'Conclusion: Gathering wood is crucial for crafting and survival.',
+      'Conclusion: Need to hunt a cow and craft a wooden pickaxe.',
+      'build_shelter: not enough blocks: need 94, have 6. Gather more first.',
+    ]);
+    expect(t).toContain('Surv_72 is my mentor; ask them when unsure');
+    expect(t.some((l) => l.startsWith('build_shelter'))).toBe(true);
+    expect(t.filter((l) => /split/i.test(l)).length).toBe(1);
+    expect(t.filter((l) => /^Conclusion: (Logs|Gathering wood)/.test(l)).length).toBe(1);
+    expect(t.some((l) => /Need to/.test(l))).toBe(false);
+    expect(t.some((l) => /Conclusion: -|Conclusion: Conclusion/.test(l))).toBe(false);
+  });
+});

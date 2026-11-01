@@ -3,7 +3,7 @@ import type { SeasonsReading } from '../contracts.js';
 import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS, isUnderground } from '../skills/helpers.js';
 import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
-import type { Memory } from './memory.js';
+import { cleanLesson, type Memory } from './memory.js';
 import { progressText } from './progress.js';
 
 export interface ObservationInput {
@@ -142,7 +142,7 @@ export function buildObservation(o: ObservationInput): string {
   const lessons = (memory.data.lessons ?? []).slice(-8);
   if (lessons.length) {
     lines.push('Lessons learned (share them!):');
-    for (const l of lessons) lines.push(`  - ${l}`);
+    for (const l of lessons) lines.push(`  - ${cleanLesson(l)}`);
   }
 
   // Social: teammates in earshot, calls for help.

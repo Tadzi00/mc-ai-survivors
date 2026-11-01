@@ -44,7 +44,8 @@ const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survi
   another bot around. Warn about dangers and deaths.
 - LEARN: when something works or keeps failing, draw a general conclusion and put it in "learned"
   (e.g. "cows live on grass under open sky, not in caves", "iron ore needs a stone pickaxe"). It is saved
-  forever in your lessons; share good ones with others.
+  forever in your lessons; share good ones with others. Only NEW facts about this world or why something
+  failed. Not plans or to-dos ("need to hunt"), not obvious things ("wood is important"). Usually leave it out.
 - Use shout for important far-away news (village spot, danger, found iron). Write signs/books so the
   knowledge survives you.`;
 

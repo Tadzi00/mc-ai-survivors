@@ -160,7 +160,15 @@ export class BotAgent {
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
   /** A player's instruction that stays at the top of the observation for a while. */
-  private order: { from: string; text: string; until: number } | undefined;
+  /** Player's standing order; persisted in memory so a restart doesn't forget it. */
+  private get order(): { from: string; text: string; until: number } | undefined {
+    return this.memory.data.order;
+  }
+  private set order(o: { from: string; text: string; until: number } | undefined) {
+    this.memory.setOrder(o);
+  }
+  private lastConclusionAt = 0;
+  private lastWhisperAt = 0;
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
   private stuckTries = 0;
@@ -559,6 +567,7 @@ export class BotAgent {
     const bot = this.bot;
     if (!bot || from === this.name || from.startsWith(this.deps.config.population.namePrefix)) return;
     const msg = message.trim();
+    if (!msg.startsWith('!')) this.lastWhisperAt = Date.now();
     const reply = (t: string): void => {
       for (const part of t.match(/.{1,230}(\s|$)/g) ?? [t]) bot.whisper(from, part.trim());
     };
@@ -610,7 +619,7 @@ export class BotAgent {
       reply(`I'm at ${fmtPos(p)}${sky < 6 ? ' (underground)' : ''}, health ${Math.round(bot.health)}/20, food ${bot.food}/20.`);
     }
     if (looksLikeOrder(msg) || parseDirectCommand(msg, from)) {
-      this.order = { from, text: msg.slice(0, 160), until: Date.now() + 5 * 60_000 };
+      this.order = { from, text: msg.slice(0, 160), until: Date.now() + 15 * 60_000 };
     }
     // Common commands run right away, no model needed.
     const cmd = parseDirectCommand(msg, from);
@@ -1110,7 +1119,7 @@ export class BotAgent {
         if (r.feet) {
           this.bunker = r.feet;
           this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)
-          this.memory.learn('At night in the open, dig 2 down and seal the top: zombies cannot reach you');
+          this.memory.learn('At night in the open, dig 3 down and seal the top: zombies cannot reach you');
           this.jsonl.write('bunker', { pos: r.feet, result: r.why });
         }
         return `night: ${r.why}`;
@@ -1225,7 +1234,11 @@ export class BotAgent {
         this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
         const answeringTo = this.replyTo;
         this.replyTo = undefined;
-        if (parsed.learned && this.memory.learn(`Conclusion: ${parsed.learned}`)) {
+        // At most one model conclusion per 3 minutes (it drew one almost every turn), unless a player
+        // just taught it something in a private message.
+        const taught = Date.now() - this.lastWhisperAt < 120_000;
+        if (parsed.learned && (taught || Date.now() - this.lastConclusionAt > 180_000) && this.memory.conclude(parsed.learned)) {
+          this.lastConclusionAt = Date.now();
           this.log('info', `concluded: ${parsed.learned}`);
           this.jsonl.write('conclusion', { text: parsed.learned });
         }

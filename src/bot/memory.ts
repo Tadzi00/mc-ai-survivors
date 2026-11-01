@@ -21,6 +21,8 @@ export interface MemoryData {
   storage?: Record<string, Chest>;
   /** Outlines of shelters/rooms this bot built (outer walls), for extend_shelter. */
   shelters?: Array<{ x0: number; z0: number; x1: number; z1: number; y0: number }>;
+  /** A player's standing order, kept across restarts until it expires (epoch ms). */
+  order?: { from: string; text: string; until: number };
 }
 
 export interface Chest {
@@ -72,12 +74,49 @@ export interface Discovery {
 export function addDiscovery(list: Discovery[], d: Discovery, mergeDist = 24, cap = 40): Discovery[] {
   if (list.some((o) => o.what === d.what && Math.hypot(o.x - d.x, o.y - d.y, o.z - d.z) <= mergeDist)) return list;
   const out = [...list, d];
-  return out.length > cap ? out.slice(out.length - cap) : out;
+  // Over the cap: drop the oldest entry of the most common kind (the 6th "water" goes before the only "bed").
+  while (out.length > cap) {
+    const counts = new Map<string, number>();
+    for (const o of out) counts.set(o.what, (counts.get(o.what) ?? 0) + 1);
+    const most = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+    out.splice(out.findIndex((o) => o.what === most), 1);
+  }
+  return out;
 }
 
-const STOP = new Set(['the', 'a', 'an', 'to', 'and', 'or', 'for', 'of', 'in', 'on', 'is', 'are', 'be', 'it', 'with', 'conclusion', 'from', 'my', 'i', 'you', 'more', 'need', 'needed', 'essential']);
+const STOP = new Set(['the', 'a', 'an', 'to', 'and', 'or', 'for', 'of', 'in', 'on', 'is', 'are', 'be', 'it', 'with', 'conclusion', 'from', 'my', 'i', 'you', 'more', 'need', 'needed', 'essential', 'one', 'key', 'crucial', 'important', 'necessary', 'efficient', 'efficiently', 'before', 'first', 'then', 'enough', 'can', 'will', 'should', 'must', 'we', 'our', 'gather', 'gathering', 'gathers', 'making', 'make', 'survival', 'survive', 'use', 'using']);
+/** Crude stemming so "splitting tasks"/"split task", "hunts"/"hunting", "logs"/"log" match. */
+const stem = (w: string): string => w.replace(/(ing|ed|es|s)$/, '').replace(/(.)\1$/, '$1');
+const SYNONYM: Record<string, string> = { wood: 'log', plank: 'log', food: 'hunt', animal: 'hunt', mine: 'resourc', min: 'resourc', explor: 'resourc' };
 const words = (t: string): Set<string> =>
-  new Set(t.toLowerCase().replace(/^conclusion:\s*/, '').split(/[^a-z0-9_]+/).filter((w) => w.length > 2 && !STOP.has(w)));
+  new Set(
+    cleanLesson(t)
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/)
+      .filter((w) => w.length > 2 && !STOP.has(w))
+      .map(stem)
+      .map((w) => SYNONYM[w] ?? w),
+  );
+
+/** Strips list markers and (repeated) "Conclusion:" labels the model copies from its own prompt. PURE. */
+export function cleanLesson(t: string): string {
+  let s = t.trim();
+  for (let i = 0; i < 4; i++) s = s.replace(/^\s*(?:[-*•]\s*|conclusion\s*:\s*)/i, '');
+  return s.trim();
+}
+
+/**
+ * A model conclusion worth keeping as a lesson? Plans and to-dos ("Need to hunt a cow", "Follow X's
+ * instructions", "Heading to ...") are not lessons: they filled the list and pushed real lessons out. PURE.
+ */
+export function isLessonWorthy(t: string): boolean {
+  const s = cleanLesson(t);
+  if (s.length < 12) return false;
+  if (/^(i |we |you )?(still )?(need|needs|have|has|want|plan|going) (to|more)\b/i.test(s)) return false;
+  if (/^(i|we|you) (should|must|will|am|are)\b/i.test(s)) return false;
+  if (/^(follow|obey|listen|heading|going|let'?s|now|next|first|then|keep|continue)\b/i.test(s)) return false;
+  return true;
+}
 
 /** Word-overlap similarity (Jaccard) of two lessons, 0..1. PURE. */
 export function lessonSimilarity(a: string, b: string): number {
@@ -88,18 +127,39 @@ export function lessonSimilarity(a: string, b: string): number {
   return inter / (A.size + B.size - inter);
 }
 
-/** Adds a lesson unless an equivalent one exists (same start, or mostly the same words). PURE. */
+/**
+ * Adds a lesson unless an equivalent one exists (same start, or mostly the same words). Over the cap the
+ * oldest model "Conclusion:" goes first; lessons from real failures, mentors and players stay longer. PURE.
+ */
 export function addLesson(list: string[], lesson: string, cap = 15): string[] {
   const l = lesson.trim().slice(0, 160);
-  const key = l.toLowerCase().slice(0, 50);
-  if (!l || list.some((o) => o.toLowerCase().slice(0, 50) === key || lessonSimilarity(o, l) >= 0.5)) return list;
+  const key = cleanLesson(l).toLowerCase().slice(0, 50);
+  if (!cleanLesson(l) || list.some((o) => cleanLesson(o).toLowerCase().slice(0, 50) === key || lessonSimilarity(o, l) >= 0.4)) return list;
   const out = [...list, l];
-  return out.length > cap ? out.slice(out.length - cap) : out;
+  while (out.length > cap) {
+    const i = out.findIndex((o) => /^Conclusion:/.test(o));
+    out.splice(i >= 0 && i < out.length - 1 ? i : 0, 1);
+  }
+  return out;
+}
+
+/** Cleans a stored lesson list: labels fixed, to-dos and near-duplicates removed (older files). PURE. */
+export function tidyLessons(list: string[], cap = 15): string[] {
+  let out: string[] = [];
+  for (const raw of list) {
+    const isConclusion = /^\s*(?:[-*•]\s*)?conclusion\s*:/i.test(raw);
+    const body = cleanLesson(raw);
+    if (isConclusion && !isLessonWorthy(body)) continue;
+    if (!isConclusion && /unknown item|unknown block/i.test(raw)) continue;
+    out = addLesson(out, isConclusion ? `Conclusion: ${body}` : raw.replace(/;\s*inventory [^;]*$/, ''), cap);
+  }
+  return out;
 }
 
 /** Turns a failed skill result into a reusable lesson, or undefined if it's not worth keeping. PURE. */
 export function lessonFrom(skill: string, args: Record<string, unknown>, result: string): string | undefined {
-  const r = result.trim();
+  const r = result.trim().replace(/;\s*inventory [^;]*$/, ''); // the inventory change is not part of the lesson
+  if (/unknown item|unknown block/i.test(r)) return undefined; // a typo, not a fact about the world
   if (!/^(cannot|could not|need|not enough|too |no known recipe|unknown item|you already)/i.test(r)) return undefined;
   if (/within \d+ blocks|cooldown|interrupted|timed out|try again/i.test(r)) return undefined; // situational
   const what = typeof args.item === 'string' ? args.item : typeof args.block === 'string' ? args.block : '';
@@ -132,6 +192,20 @@ export class Memory {
   constructor(stateDir: string, name: string, private readonly maxNotes: number) {
     this.file = path.join(stateDir, 'bots', `${name}.json`);
     this.data = readJsonFile<MemoryData>(this.file) ?? { name, goal: null, notes: [], places: {} };
+    if (this.data.lessons?.length) this.data.lessons = tidyLessons(this.data.lessons);
+    if (this.data.order && this.data.order.until < Date.now()) delete this.data.order;
+  }
+
+  /** Model conclusion -> lesson, if it is a real lesson (not a to-do) and not a repeat. */
+  conclude(text: string): boolean {
+    if (!isLessonWorthy(text)) return false;
+    return this.learn(`Conclusion: ${cleanLesson(text)}`);
+  }
+
+  setOrder(order: { from: string; text: string; until: number } | undefined): void {
+    if (order) this.data.order = order;
+    else delete this.data.order;
+    this.save();
   }
 
   addNote(note: string): void {
