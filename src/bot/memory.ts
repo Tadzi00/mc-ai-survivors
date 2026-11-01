@@ -142,6 +142,7 @@ export const LESSON_CAP = 15;
 
 export function addLesson(list: string[], lesson: string, cap = LESSON_CAP): string[] {
   const l = lesson.trim().slice(0, 160);
+  if (isGarbageLesson(l)) return list;
   const key = cleanLesson(l).toLowerCase().slice(0, 50);
   if (!cleanLesson(l) || list.some((o) => cleanLesson(o).toLowerCase().slice(0, 50) === key || lessonSimilarity(o, l) >= 0.4)) return list;
   const out = [...list, l];
@@ -159,6 +160,7 @@ export function tidyLessons(list: string[], cap = LESSON_CAP): string[] {
     const isConclusion = /^\s*(?:[-*•]\s*)?conclusion\s*:/i.test(raw);
     const body = cleanLesson(raw);
     if (isConclusion && !isLessonWorthy(body)) continue;
+    if (isGarbageLesson(raw)) continue;
     if (!isConclusion && /unknown item|unknown block/i.test(raw)) continue;
     out = addLesson(out, isConclusion ? `Conclusion: ${body}` : raw.replace(/;\s*inventory [^;]*$/, ''), cap);
   }
@@ -166,13 +168,45 @@ export function tidyLessons(list: string[], cap = LESSON_CAP): string[] {
 }
 
 /** Turns a failed skill result into a reusable lesson, or undefined if it's not worth keeping. PURE. */
+/** Which pickaxe an ore/stone needs (vanilla tiers). */
+const NEEDS_PICKAXE: Array<[RegExp, string]> = [
+  [/obsidian|ancient_debris/, 'a diamond pickaxe'],
+  [/diamond_ore|gold_ore|redstone_ore|emerald_ore/, 'an iron pickaxe or better'],
+  [/iron_ore|copper_ore|lapis_ore/, 'a stone pickaxe or better'],
+  [/stone|coal_ore|cobble|deepslate|andesite|diorite|granite|tuff/, 'any pickaxe (a wooden one is enough)'],
+];
+
+/**
+ * Turns a failed skill result into a GENERAL rule worth teaching, or undefined. Raw error messages
+ * ("cannot craft X: 3 more cobblestone", "could not walk to ... (3 unreachable)", "you already have ...") were
+ * stored and passed from mentor to newborn for generations: they describe one bot's moment, not the world. PURE.
+ */
 export function lessonFrom(skill: string, args: Record<string, unknown>, result: string): string | undefined {
-  const r = result.trim().replace(/;\s*inventory [^;]*$/, ''); // the inventory change is not part of the lesson
-  if (/unknown item|unknown block/i.test(r)) return undefined; // a typo, not a fact about the world
-  if (!/^(cannot|could not|need|not enough|too |no known recipe|unknown item|you already)/i.test(r)) return undefined;
-  if (/within \d+ blocks|cooldown|interrupted|timed out|try again/i.test(r)) return undefined; // situational
-  const what = typeof args.item === 'string' ? args.item : typeof args.block === 'string' ? args.block : '';
-  return `${skill}${what ? ` ${what}` : ''}: ${r}`;
+  const r = result.trim().replace(/;\s*inventory [^;]*$/, '');
+  const tool = /need (?:a better tool|a [a-z_]+ pickaxe|a [a-z_ ()0-9+]+) to harvest ([a-z_]+)/i.exec(r);
+  if (tool) {
+    const block = tool[1]!.replace(/^deepslate_/, '');
+    const need = NEEDS_PICKAXE.find(([re]) => re.test(block))?.[1];
+    if (need) return `${block.replace(/_/g, ' ')} needs ${need} to drop anything`;
+  }
+  if (/smelt/.test(skill) && /no fuel|need fuel/i.test(r)) return 'smelting needs fuel in the furnace: coal, charcoal, logs or planks';
+  if (/water or lava next to the hole/i.test(r)) return 'never dig your night hole next to water or lava: dig a few blocks away';
+  return undefined;
+}
+
+/**
+ * Not a lesson at all: raw error messages, counts of missing items, one-off situations, and empty value
+ * statements the model likes to "conclude" ("logs are essential for crafting"). PURE.
+ */
+export function isGarbageLesson(l: string): boolean {
+  const s = cleanLesson(l.replace(/^From \w+: /, '').replace(/^Library \([^)]*\): /, ''));
+  if (/^(craft|gather|build_shelter|extend_shelter|place_bed|place_torch|add_door|smelt|chest_\w+|goto|attack|explore|farm|sleep|eat)\b[^:]*:/i.test(s) && !/needs .* to drop/.test(s)) return true;
+  if (/\b\d+ more\b|you already have|could not walk|unreachable|not enough blocks|no free plot|no known recipe|unknown (item|block)|found no reachable|within \d+ blocks|timed out|\(try \d\)/i.test(s)) return true;
+  if (/\b(is|are) (essential|crucial|important|key|vital|necessary|needed|required)\b|\bessential for\b|\bcrucial for\b|\bis key\b/i.test(s)) return true;
+  // plans ("Gather wood and start mining after the field") and obedience slogans are not knowledge
+  if (/^(gather|collect|craft|build|start|go|find|explore|hunt|mine|get|make|place|finish|prepare)\b.*\b(and|then|after|before)\b/i.test(s)) return true;
+  if (/\b(follow|obey) (the )?orders\b|\bordered items\b|\bcreators?\b/i.test(s)) return true;
+  return false;
 }
 
 /**

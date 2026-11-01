@@ -120,13 +120,13 @@ describe('auto memory', () => {
     expect(big).toHaveLength(40);
   });
   it('dedups lessons', () => {
-    let l = addLesson([], 'gather iron_ore: need a better tool to harvest iron_ore (craft a pickaxe)');
-    l = addLesson(l, 'gather iron_ore: need a better tool to harvest iron_ore (craft a stone pickaxe)');
+    let l = addLesson([], 'iron ore needs a stone pickaxe or better to drop anything');
+    l = addLesson(l, 'iron ore needs a stone pickaxe or better to drop anything!');
     expect(l).toHaveLength(1);
   });
   it('turns failures into lessons, skips situational ones', () => {
     expect(lessonFrom('gather', { block: 'iron_ore' }, 'need a better tool to harvest iron_ore (craft a pickaxe)')).toBe(
-      'gather iron_ore: need a better tool to harvest iron_ore (craft a pickaxe)',
+      'iron ore needs a stone pickaxe or better to drop anything',
     );
     expect(lessonFrom('attack', { target: 'cow' }, 'no cow within 24 blocks')).toBeUndefined();
     expect(lessonFrom('gather', { block: 'log' }, 'gathered 8 log (wanted 8)')).toBeUndefined();
@@ -155,10 +155,10 @@ import { lessonSimilarity } from '../src/bot/memory.js';
 
 describe('lesson dedup by meaning', () => {
   it('treats reworded conclusions as duplicates, keeps different ones', () => {
-    let l = addLesson([], 'Conclusion: Logs are essential for crafting, tools, and protection.');
-    l = addLesson(l, 'Conclusion: Logs are needed for crafting tools and protection');
+    let l = addLesson([], 'Conclusion: cows live on grass under open sky, not in caves');
+    l = addLesson(l, 'Conclusion: cows live on the grass under the open sky, never in caves');
     expect(l).toHaveLength(1);
-    l = addLesson(l, 'Conclusion: cows live on grass under open sky, not in caves');
+    l = addLesson(l, 'Conclusion: skeletons hide in caves during the day');
     expect(l).toHaveLength(2);
     expect(lessonSimilarity('iron ore needs a stone pickaxe', 'cows live on grass')).toBe(0);
   });
@@ -202,9 +202,9 @@ describe('lesson hygiene', () => {
       'build_shelter: not enough blocks: need 94, have 6. Gather more first.',
     ]);
     expect(t).toContain('Surv_72 is my mentor; ask them when unsure');
-    expect(t.some((l) => l.startsWith('build_shelter'))).toBe(true);
+    expect(t.some((l) => l.startsWith('build_shelter'))).toBe(false); // raw error messages are not lessons
     expect(t.filter((l) => /split/i.test(l)).length).toBe(1);
-    expect(t.filter((l) => /^Conclusion: (Logs|Gathering wood)/.test(l)).length).toBe(1);
+    expect(t.filter((l) => /^Conclusion: (Logs|Gathering wood)/.test(l)).length).toBe(0); // "is essential/crucial" says nothing
     expect(t.some((l) => /Need to/.test(l))).toBe(false);
     expect(t.some((l) => /Conclusion: -|Conclusion: Conclusion/.test(l))).toBe(false);
   });
@@ -301,5 +301,29 @@ describe('field site', () => {
     expect(s.water).toEqual({ x: 0, y: 62, z: 0 });
     expect(Math.hypot(s.tiles[0]!.x, s.tiles[0]!.z)).toBe(1);
     expect(bestFieldSite([{ x: 100, y: 62, z: 100 }], soil, { x: 0, y: 0, z: 0 })).toBeUndefined();
+  });
+});
+
+import { isGarbageLesson, lessonFrom as lf2 } from '../src/bot/memory.js';
+describe('lesson quality', () => {
+  it('raw errors and value statements are garbage', () => {
+    for (const g of [
+      'From Surv_19: craft stone_pickaxe: cannot craft stone_pickaxe: 3 more cobblestone; 2 more stick',
+      'build_shelter: could not walk to any building plot in the village (3 unreachable)',
+      'craft stone_pickaxe: you already have a stone_pickaxe',
+      'craft bed: cannot craft white_bed: 3 more white_wool',
+      'Conclusion: Logs are needed for crafting and shelter building.',
+      'Conclusion: Wood is essential for crafting and shelter building.',
+    ]) expect(isGarbageLesson(g)).toBe(true);
+    for (const ok of [
+      'At night in the open, dig 3 down and seal the top: zombies cannot reach you',
+      'Conclusion: Sheep live on grass under open sky, not in caves.',
+      'Taught by TAdzi00: diamonds are found from Y = -64 to Y = 16',
+      'iron ore needs a stone pickaxe or better to drop anything',
+    ]) expect(isGarbageLesson(ok)).toBe(false);
+  });
+  it('failures become general rules or nothing', () => {
+    expect(lf2('gather', { block: 'iron_ore' }, 'need a better tool to harvest iron_ore (craft a pickaxe)')).toBe('iron ore needs a stone pickaxe or better to drop anything');
+    expect(lf2('craft', { item: 'stone_pickaxe' }, 'cannot craft stone_pickaxe: 3 more cobblestone')).toBeUndefined();
   });
 });

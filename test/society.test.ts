@@ -7,8 +7,8 @@ const mem = (p: Partial<MemoryData>): MemoryData => ({ name: 'x', goal: null, no
 
 describe('society', () => {
   it('ranks lessons: player teaching and real failures before conclusions', () => {
-    const t = topLessons(['Conclusion: wood is good', 'DEATH: x', 'Taught by TAdzi00: diamonds below y 16', 'gather iron_ore: need a stone pickaxe', 'Surv_1 is my mentor; ask'], 3);
-    expect(t).toEqual(['diamonds below y 16', 'gather iron_ore: need a stone pickaxe', 'Conclusion: wood is good']);
+    const t = topLessons(['Conclusion: cows live on grass', 'DEATH: x', 'Taught by TAdzi00: diamonds below y 16', 'At night in the open, dig 3 down', 'craft x: 3 more planks', 'Surv_1 is my mentor; ask'], 3);
+    expect(t).toEqual(['diamonds below y 16', 'At night in the open, dig 3 down', 'Conclusion: cows live on grass']);
   });
   it('shares the village, valuable finds and one lesson the other lacks', () => {
     const teacher = mem({

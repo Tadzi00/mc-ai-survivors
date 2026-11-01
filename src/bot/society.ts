@@ -1,6 +1,6 @@
 // Knowledge flow between bots (PURE, unit-tested): what to teach, what to share when meeting, which "say"
 // is useless chatter, questions and answers, newborn names. The agent does the talking and walking.
-import type { Discovery, MemoryData, Place } from './memory.js';
+import { isGarbageLesson, type Discovery, type MemoryData, type Place } from './memory.js';
 
 // ---------------------------------------------------------------- lessons
 
@@ -17,7 +17,7 @@ export function topLessons(lessons: readonly string[], n: number): string[] {
     return 2;
   };
   return lessons
-    .filter((l) => !/^DEATH|is my mentor|gave me a home/.test(l))
+    .filter((l) => !/^DEATH|is my mentor|gave me a home|My home is/.test(l) && !isGarbageLesson(l))
     .map((l, i) => ({ l, s: score(l), i }))
     .sort((a, b) => b.s - a.s || b.i - a.i)
     .slice(0, n)
