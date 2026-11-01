@@ -111,10 +111,12 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
       tried.push(r.split(';')[0]!);
     }
     if (village.data.buildings.length > 0) {
-      if (unreachable && !tried.length) {
-        return `could not walk to any building plot in the village (${unreachable} unreachable${scanRoom(bot, bot.entity.position.floored()) ? '; you are shut inside a room - add_door first' : ''})`;
+      if (scanRoom(bot, bot.entity.position.floored())) {
+        return `could not walk to any building plot in the village (${unreachable} unreachable; you are shut inside a room - add_door first)`;
       }
-      return `no free plot next to the village buildings (${tried.length} tried${tried[0] ? `: ${tried[0]}` : ''}); clear flat ground beside them or extend_shelter`;
+      // No plot beside the others is reachable (hills, water, trees): we are in the village anyway, so build
+      // here or a few blocks away instead of giving up (a bot failed this six times and stayed homeless).
+      ctx.log(`no reachable village plot (${unreachable} unreachable, ${tried.length} unsuitable): building near where I stand`);
     }
   }
   const first = await buildShelterHere(ctx, a);
@@ -466,17 +468,31 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
     }
     // Stand exactly in the middle of the cell behind the bed: off-centre, the bot's body overlapped the bed
     // cell or it faced a bit sideways (the head pointed into a wall) and the server silently refused.
-    await walkStraight(bot, o.stand, 1500).catch(() => false);
-    bot.clearControlStates();
-    await sleep(150);
-    await bot.equip(bedItem, 'hand');
-    await bot.lookAt(o.head.offset(0.5, 0.2, 0.5), true);
-    try {
-      await bot.placeBlock(bot.blockAt(o.foot.offset(0, -1, 0))!, v3(0, 1, 0));
-    } catch (e) {
-      ctx.log(`bed at ${fmtPos(o.foot)}: ${(e as Error).message}`);
+    // The server silently refuses a bed whose cells touch the bot's body: centre on the stand cell and
+    // check, then try twice.
+    const overlaps = (): boolean => {
+      const b = bot.entity.position;
+      return [o.foot, o.head].some((c) => Math.abs(b.x - (c.x + 0.5)) < 0.8 && Math.abs(b.z - (c.z + 0.5)) < 0.8 && Math.abs(b.y - c.y) < 1.5);
+    };
+    for (let attempt = 0; attempt < 2 && !bot.isABed(bot.blockAt(o.foot)!); attempt++) {
+      await walkStraight(bot, o.stand, 1500).catch(() => false);
+      bot.clearControlStates();
+      await sleep(200);
+      if (overlaps()) {
+        await walkStraight(bot, o.stand, 1500).catch(() => false);
+        bot.clearControlStates();
+        await sleep(200);
+        if (overlaps()) continue;
+      }
+      await bot.equip(bedItem, 'hand');
+      await bot.lookAt(o.head.offset(0.5, 0.2, 0.5), true);
+      try {
+        await bot.placeBlock(bot.blockAt(o.foot.offset(0, -1, 0))!, v3(0, 1, 0));
+      } catch (e) {
+        ctx.log(`bed at ${fmtPos(o.foot)} (try ${attempt + 1}): ${(e as Error).message}`);
+      }
+      await sleep(250);
     }
-    await sleep(200);
     const placed = bot.blockAt(o.foot);
     if (placed && bot.isABed(placed)) {
       const claimed = ctx.memory.place('bed');
