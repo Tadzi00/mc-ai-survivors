@@ -2,7 +2,7 @@ import type { Entity } from 'prismarine-entity';
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { fmtPos, goSurface, gotoNear, isStandable, isUnderground, nearestBlock, v3 } from '../helpers.js';
+import { fmtPos, goSurface, gotoNear, HOSTILE_MOBS, isStandable, isUnderground, nearestBlock, v3 } from '../helpers.js';
 
 export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): Entity | undefined {
   const { bot } = ctx;
@@ -43,7 +43,12 @@ export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): 
     if (!seen) return `no ${target} within 48 blocks and none remembered; explore to find some`;
     await gotoNear(ctx, seen.d.x, seen.d.y, seen.d.z, 4, 60_000).catch(() => undefined);
     e = nearestEntity(ctx, target, 32);
-    if (!e) return `went to where ${target}s were seen (${seen.d.x},${seen.d.y},${seen.d.z}) but they are gone; explore`;
+    if (!e) {
+      // stale memory: forget this herd so the next try looks elsewhere
+      ctx.memory.data.discoveries = (ctx.memory.data.discoveries ?? []).filter((d) => d !== seen.d);
+      ctx.memory.save();
+      return `went to where ${target}s were seen (${seen.d.x},${seen.d.y},${seen.d.z}) but they are gone (forgot that spot); explore`;
+    }
   }
   const sword = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ?? bot.inventory.items().find((i) => i.name.endsWith('_axe'));
   if (sword) await bot.equip(sword, 'hand').catch(() => undefined);
@@ -52,8 +57,12 @@ export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): 
   try {
     while (Date.now() < deadline) {
       await sleep(500, ctx.signal);
-      if (!bot.entities[e.id] || !e.isValid) return `defeated/lost ${a.target}`;
-      if (bot.health < 6) return `retreated from ${a.target} (low health)`;
+      if (!bot.entities[e.id] || !e.isValid) {
+        const got = await pickUpDrops(ctx, e.position.clone());
+        return `defeated/lost ${a.target}${got ? `, picked up ${got} drop(s)` : ''}`;
+      }
+      // Only back off from things that hit back; a starving bot must still be able to kill a cow.
+      if (bot.health < 6 && HOSTILE_MOBS.has(e.name ?? '')) return `retreated from ${a.target} (low health)`;
     }
   } finally {
     await bot.pvp.stop().catch(() => bot.pvp.forceStop());
@@ -129,4 +138,21 @@ export async function sleepSkill(ctx: SkillContext): Promise<string> {
   const deadline = Date.now() + 60_000;
   while (bot.isSleeping && Date.now() < deadline) await sleep(1000, ctx.signal);
   return 'slept';
+}
+
+/** Walk over item drops near `where` (meat, wool, leather...) so they are actually collected. */
+async function pickUpDrops(ctx: SkillContext, where: { x: number; y: number; z: number }): Promise<number> {
+  const { bot } = ctx;
+  await sleep(500); // drops spawn a moment after death
+  let n = 0;
+  for (let i = 0; i < 4; i++) {
+    const drop = Object.values(bot.entities)
+      .filter((x) => x.name === 'item' && x.position.distanceTo(bot.entity.position.clone().set(where.x, where.y, where.z)) < 8)
+      .sort((p, q) => p.position.distanceTo(bot.entity.position) - q.position.distanceTo(bot.entity.position))[0];
+    if (!drop) break;
+    await gotoNear(ctx, drop.position.x, drop.position.y, drop.position.z, 0, 6_000).catch(() => undefined);
+    await sleep(300);
+    n++;
+  }
+  return n;
 }

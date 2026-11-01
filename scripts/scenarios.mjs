@@ -167,6 +167,19 @@ export const scenarios = {
     return ok(beef > 0, `attack: ${r} | beef=${beef}`);
   },
 
+  async hunt_low_health(ctx, P) {
+    await P.give('stone_sword', 1);
+    await P.cmd(`effect give ${P.botName} minecraft:instant_damage 1 1 true`); // 20 -> ~8 hp
+    await P.cmd(`effect give ${P.botName} minecraft:instant_damage 1 0 true`); // -> ~2-5 hp
+    await P.cmd(`summon minecraft:cow ${P.X + 4} ${P.Y} ${P.Z}`);
+    await P.sleep(1500);
+    const hp = ctx.bot.health;
+    const r = await attackSkill(ctx, { target: 'cow' });
+    await P.sleep(2500);
+    const beef = await count(P, 'beef');
+    return ok(beef > 0, `health ${hp} | attack: ${r} | beef=${beef}`);
+  },
+
   async eat(ctx, P) {
     await P.cmd(`effect give ${P.botName} minecraft:hunger 3 255`);
     await P.sleep(3500);
