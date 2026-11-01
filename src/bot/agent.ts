@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
@@ -159,6 +159,8 @@ export class BotAgent {
   ) {
     const { paths, bot: b } = deps.config;
     this.memory = new Memory(paths.state, name, b.notesMax);
+    const savedBunker = this.memory.place('bunker');
+    if (savedBunker) this.bunker = v3(savedBunker.x, savedBunker.y, savedBunker.z);
     this.chat = new ChatLog(b.chatHistory);
     this.jsonl = new JsonlLog(paths.logs, name);
     if (birthBed && !this.memory.place('bed')) {
@@ -1015,6 +1017,7 @@ export class BotAgent {
         const r = await digBunker(ctx);
         if (r.feet) {
           this.bunker = r.feet;
+          this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)
           this.memory.learn('At night in the open, dig 2 down and seal the top: zombies cannot reach you');
           this.jsonl.write('bunker', { pos: r.feet, result: r.why });
         }
@@ -1023,6 +1026,8 @@ export class BotAgent {
       case 'leave_bunker': {
         const r = await goSurface(ctx);
         this.bunker = undefined;
+        delete this.memory.data.places.bunker;
+        this.memory.save();
         return `morning: ${r}`;
       }
       case 'eat':
