@@ -28,6 +28,7 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Torch = coal or charcoal + stick. Charcoal = smelt a log. One torch often keeps a small sealed room warm
   (more in deep winter). A room warms up SLOWLY: after heat_room, wait instead of adding torches. A campfire
   or lit furnace makes a small room too hot.
+- Wool (beds): SHEAR sheep (shears = 2 iron) instead of killing them - they grow the wool back.
 - Farming: animals do NOT come back once eaten - a wheat field is food that lasts (bread = 3 wheat).
   Seeds come from breaking tall grass. Farmland must be within 4 blocks of water: WITHOUT A BUCKET the field
   has to be right next to a lake or river (a bucket, 3 iron, lets you bring water anywhere).

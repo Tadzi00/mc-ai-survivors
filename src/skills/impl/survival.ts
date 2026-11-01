@@ -1,4 +1,5 @@
 import { exploreSkill } from './movement.js';
+import { craftSkill } from './resources.js';
 import type { Entity } from 'prismarine-entity';
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
@@ -223,4 +224,52 @@ async function pickUpDrops(ctx: SkillContext, where: { x: number; y: number; z: 
     n++;
   }
   return n;
+}
+
+/** Sheep flags (metadata index 17): low 4 bits colour, 0x10 = sheared. */
+function isSheared(e: Entity): boolean {
+  const flags = Number((e.metadata as unknown as unknown[] | undefined)?.[17] ?? 0);
+  return (flags & 0x10) !== 0;
+}
+
+/**
+ * shear: wool without killing the sheep (it grows back after eating grass). Makes shears from 2 iron if
+ * needed, shears up to `count` woolly sheep within 32 blocks and picks the wool up.
+ */
+export async function shearSkill(ctx: SkillContext, a: SkillArgsOf<'shear'>): Promise<string> {
+  const { bot } = ctx;
+  const woolCount = (): number => bot.inventory.items().filter((i) => i.name.endsWith('_wool')).reduce((n, i) => n + i.count, 0);
+  if (!bot.inventory.items().some((i) => i.name === 'shears')) {
+    const r = await craftSkill(ctx, { item: 'shears', count: 1 });
+    if (!bot.inventory.items().some((i) => i.name === 'shears')) return `need shears (2 iron ingots): ${r}`;
+  }
+  const before = woolCount();
+  const tried = new Set<number>();
+  let sheared = 0;
+  for (let k = 0; k < a.count; k++) {
+    throwIfAborted(ctx.signal);
+    const me = bot.entity.position;
+    const sheep = Object.values(bot.entities)
+      .filter((e) => e.name === 'sheep' && !tried.has(e.id) && !isSheared(e) && e.position.distanceTo(me) <= 32)
+      .sort((p, q) => p.position.distanceTo(me) - q.position.distanceTo(me))[0];
+    if (!sheep) break;
+    tried.add(sheep.id);
+    await gotoNear(ctx, sheep.position.x, sheep.position.y, sheep.position.z, 1.5, 20_000).catch(() => undefined);
+    if (sheep.position.distanceTo(bot.entity.position) > 4) continue;
+    const shears = bot.inventory.items().find((i) => i.name === 'shears');
+    if (!shears) break;
+    await bot.equip(shears, 'hand');
+    await bot.lookAt(sheep.position.offset(0, 0.8, 0), true);
+    const w0 = woolCount();
+    await bot.activateEntity(sheep).catch(() => undefined);
+    await sleep(500);
+    // the wool pops out around the sheep: walk over it
+    for (const e of Object.values(bot.entities)) {
+      if (e.name === 'item' && e.position.distanceTo(sheep.position) < 4) await gotoNear(ctx, e.position.x, e.position.y, e.position.z, 0, 2500).catch(() => undefined);
+    }
+    if (woolCount() > w0 || isSheared(sheep)) sheared++;
+  }
+  const got = woolCount() - before;
+  if (!sheared && !got) return 'no woolly sheep within 32 blocks (sheared sheep regrow wool by eating grass)';
+  return `sheared ${sheared} sheep, +${got} wool (they live on and regrow it)`;
 }

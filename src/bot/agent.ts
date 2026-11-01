@@ -2054,6 +2054,12 @@ export class BotAgent {
       this.forcedStep = { ...action, resumes: resumes + 1 } as PlannedAction;
       result += ' (will resume the order)';
     }
+    // Chopped trees: plant the saplings we picked up, so the woods around the village grow back
+    // (generations of bots cut it bare and newborns found no wood at all).
+    if (action.skill === 'gather' && /log|wood|tree/.test(String(action.args.block ?? '')) && /^gathered/.test(result) && this.bot) {
+      const saplings = this.bot.inventory.items().filter((i) => i.name.endsWith('_sapling')).reduce((n, i) => n + i.count, 0);
+      if (saplings > 0 && !this.forcedStep) this.forcedStep = { skill: 'plant_sapling', args: { count: Math.min(4, saplings) }, thought: 'order from myself: replant the trees I cut' };
+    }
     // We handed something to a teammate: they step over and pick it up.
     if (action.skill === 'give' && /^gave /.test(result)) {
       const to = String(action.args.player ?? '');

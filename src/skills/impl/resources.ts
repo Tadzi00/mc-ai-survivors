@@ -80,13 +80,15 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   let explored = 0;
   /** Nothing nearby and nothing remembered: walk ~48 blocks in a fresh direction and look again. */
   const exploreFor = async (): Promise<boolean> => {
-    if (explored >= 2) return false;
+    // Logs: the area around the village gets cut bare by generations of bots, so look further for wood.
+    if (explored >= (wantLogs ? 3 : 2)) return false;
     explored++;
     const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] as const;
     const [dx, dz] = dirs[Math.floor(Math.random() * dirs.length)]!;
     const p = bot.entity.position;
     try {
-      await gotoXZ(ctx, p.x + dx * 48, p.z + dz * 48, 45_000);
+      const far = wantLogs ? 64 : 48;
+      await gotoXZ(ctx, p.x + dx * far, p.z + dz * far, 60_000);
     } catch {
       if (ctx.signal.aborted) throw new AbortError();
     }

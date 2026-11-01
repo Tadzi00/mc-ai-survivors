@@ -543,6 +543,10 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   every 20 min (the time is shared, first comes first). Ladder step "wheat field"; cheat sheet: animals do
   not come back, fields need water within 4 blocks (no bucket -> next to a lake/river).
   Next phases: animal pens + breeding, then a heated greenhouse for winter.
+- **Wool & wood keep coming back**: `shear` (shears from 2 iron) takes wool from living sheep (sheep flag
+  0x10 in metadata 17 = sheared; they regrow by eating grass); the bed hint prefers shearing. After chopping
+  logs the bot plants the saplings it picked up (forced `plant_sapling`), and `gather` looks for wood up to
+  3 x 64 blocks away (the village area gets cut bare).
 - **Births** (`population.*`): at most `maxBirthsPerDay` (2) per MC day; only at a bed with a settled bot
   within `birthNeedsBotWithin` (24) blocks; the newborn's home and bed are its birth bed; it is an
   *apprentice* (`apprenticeSeconds`, 300): no digging, no planning (answers only) until the nearest bot has

@@ -56,7 +56,11 @@ export function milestones(f: ProgressFacts): Milestone[] {
       return `there is a bed at ${f.bedNear.x},${f.bedNear.y},${f.bedNear.z}: claim it (right-click by day, sleep by night) {"skill":"sleep","args":{}}`;
     }
     if (bedsInInv > 0) return `go inside your shelter and place it: {"skill":"place_bed","args":{}}`;
-    if (wool < 3) return `need ${3 - wool} more wool for a ${which} bed: kill sheep {"skill":"attack","args":{"target":"sheep"}}`;
+    if (wool < 3) {
+      return (it.shears ?? 0) > 0 || (it.iron_ingot ?? 0) >= 2
+        ? `need ${3 - wool} more wool for a ${which} bed: shear sheep {"skill":"shear","args":{"count":3}} (they keep living and regrow it)`
+        : `need ${3 - wool} more wool for a ${which} bed: kill sheep {"skill":"attack","args":{"target":"sheep"}} (or shear them: shears = 2 iron, the sheep live on)`;
+    }
     return `craft the ${which} bed: {"skill":"craft","args":{"item":"bed","count":1}} (any wool colour works)`;
   };
 

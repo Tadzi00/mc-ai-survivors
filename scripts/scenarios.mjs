@@ -3,7 +3,7 @@
 import { writeSignSkill, readSignsSkill, writeBookSkill, readBookSkill } from '../dist/skills/impl/knowledge.js';
 import { smeltSkill, gatherSkill, craftSkill } from '../dist/skills/impl/resources.js';
 import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill, buildShelterSkill } from '../dist/skills/impl/building.js';
-import { sleepSkill, attackSkill, eatSkill, pickBerries } from '../dist/skills/impl/survival.js';
+import { sleepSkill, attackSkill, eatSkill, pickBerries, shearSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
 import { digBunker, emergencyHut, leaveHut } from '../dist/skills/helpers.js';
@@ -396,6 +396,18 @@ export const scenarios = {
     const n = await pickBerries(ctx);
     const bushes = (await isBlock(P, P.X + 4, P.Y, P.Z - 2, 'minecraft:sweet_berry_bush')) && (await isBlock(P, P.X + 4, P.Y, P.Z + 2, 'minecraft:sweet_berry_bush'));
     return ok(n >= 2 && bushes, `picked ${n} berries, bushes still there=${bushes}`);
+  },
+
+  // Shears from 2 iron, then wool from living sheep.
+  async shear(ctx, P) {
+    for (const dz of [-3, 3]) await P.cmd(`summon minecraft:sheep ${P.X + 5} ${P.Y} ${P.Z + dz} {NoAI:1b}`);
+    await P.give('iron_ingot', 2);
+    await P.give('oak_planks', 4);
+    await P.sleep(1200);
+    const r = await shearSkill(ctx, { count: 2 });
+    const wool = await count(P, 'white_wool');
+    const alive = /passed/i.test(await P.cmd(`execute if entity @e[type=sheep,x=${P.X - 12},y=${P.Y - 2},z=${P.Z - 12},dx=24,dy=10,dz=24]`));
+    return ok(wool >= 2 && alive, `${r} | white_wool=${wool} sheep alive=${alive}`);
   },
 
   async eat(ctx, P) {
