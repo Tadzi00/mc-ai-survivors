@@ -218,6 +218,7 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  private currentReflex: Reflex | undefined;
   private skippedInARow = 0;
   private pendingMentee: BotAgent | undefined;
   private lastLibraryWrite = 0;
@@ -1223,7 +1224,8 @@ export class BotAgent {
     if (this.unsticking) return;
     // Fighting/fleeing stands still on purpose (pvp keeps the pathfinder "moving"): never "unstick" then,
     // that used to stop the pathfinder and end the fight.
-    if (!bot.pathfinder.isMoving() || bot.isSleeping || this.reflexBusy || bot.pvp.target || this.currentSkill === 'attack') {
+    // (Fleeing/hunting/helping DO move: a bot fleeing into a wall corner stood there until a zombie killed it.)
+    if (!bot.pathfinder.isMoving() || bot.isSleeping || this.currentReflex === 'fight' || bot.pvp.target || this.currentSkill === 'attack') {
       this.moveTrack = [];
       this.stuckTries = 0;
       return;
@@ -1260,10 +1262,14 @@ export class BotAgent {
         await bot.dig(b, true).catch(() => undefined);
         return;
       }
-      this.jsonl.write('stuck', { pos: { x: front.x, y: front.y, z: front.z }, action: 'jump' });
-      bot.setControlState('jump', true);
-      await sleep(400);
-      bot.setControlState('jump', false);
+      // Snagged on a corner (often when moving diagonally past a wall): jump first, then step sideways /
+      // back, which frees the hitbox so the pathfinder can go on.
+      const moves: Array<Array<'jump' | 'left' | 'right' | 'back'>> = [['jump'], ['left', 'jump'], ['right', 'jump'], ['back']];
+      const m = moves[(this.stuckTries - 1) % moves.length]!;
+      this.jsonl.write('stuck', { pos: { x: front.x, y: front.y, z: front.z }, action: m.join('+') });
+      for (const c of m) bot.setControlState(c, true);
+      await sleep(m.includes('back') ? 500 : 400);
+      for (const c of m) bot.setControlState(c, false);
     } finally {
       this.unsticking = false;
     }
@@ -1416,6 +1422,7 @@ export class BotAgent {
     if (choice === 'sleep' && this.currentSkill === 'sleep') return;
     this.reflexLastRun.set(choice, Date.now());
     this.reflexBusy = true;
+    this.currentReflex = choice;
     if (this.skillAbort && this.currentSkill) {
       this.interruptedBy = choice;
       this.skillAbort.abort();
@@ -1431,6 +1438,7 @@ export class BotAgent {
     } finally {
       clearTimeout(timer);
       this.reflexBusy = false;
+      this.currentReflex = undefined;
     }
     this.log('debug', `reflex ${choice}: ${result}`);
     this.jsonl.write('reflex', { reflex: choice, result, ms: Date.now() - started });
@@ -1502,10 +1510,17 @@ export class BotAgent {
           bot.setControlState('sprint', true);
           await gotoNear(ctx, home.x, home.y, home.z, 1, 15_000).catch(() => undefined);
           bot.setControlState('sprint', false);
-          return 'fled home';
+          const atHome = bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3;
+          const close = this.hostilesWithin(3)[0];
+          if (!atHome && close) return `cornered on the way home: ${await this.runReflex('fight', close, signal)}`;
+          return atHome ? 'fled home' : 'could not get home';
         }
         if (!hostile) return 'nothing to flee';
-        return this.runAway(ctx, signal, 15_000);
+        const r = await this.runAway(ctx, signal, 15_000);
+        const close = this.hostilesWithin(3)[0];
+        // Stuck with the monster on us: fighting back beats running into a wall until dead.
+        if (r === 'still chased' && close) return `cornered: ${await this.runReflex('fight', close, signal)}`;
+        return r;
       }
       case 'assist': {
         const call = this.helpCall;
@@ -1626,6 +1641,7 @@ export class BotAgent {
           this.planningSince = Date.now();
           const seq = this.orderSeq;
           const steps = await this.plan();
+          if (this.isDead || !this.running) break; // died while the model was thinking
           // A player's order arrived while the model was thinking: its steps win, drop this plan.
           if (this.orderSeq !== seq) continue;
           // Dug in for the night: only steps that don't leave the hole (talking, reading, writing).
@@ -1731,6 +1747,7 @@ export class BotAgent {
         }
         // Narration ("Heading to gather 8 logs") and repeats drown real information: only answers and new,
         // useful things are said aloud.
+        if (this.isDead) return [];
         const chatter = !answeringTo && !!parsed.say && (isChatter(parsed.say) || saidRecently(parsed.say, this.saidLog));
         if (parsed.say && this.bot && chatter) {
           this.jsonl.write('said_skipped', { text: parsed.say });

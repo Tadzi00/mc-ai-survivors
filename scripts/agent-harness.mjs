@@ -100,6 +100,27 @@ const scenarios = {
     return { ok: dead && survived, why: `husk killed=${dead}, bot alive=${survived}` };
   },
 
+  /** Low on health in a dead-end corner with a husk in the way out: it must fight back, not run into walls. */
+  async cornered() {
+    const [a] = await startAgents([{ name: 'TestA_corner', x: X, z: Z }]);
+    // dead end: walls west, north and south of a 1-wide corridor; the way out is east (where the husk is)
+    await cmd(`fill ${X - 1} ${Y} ${Z - 1} ${X - 1} ${Y + 2} ${Z + 1} minecraft:stone`);
+    await cmd(`fill ${X} ${Y} ${Z - 1} ${X + 3} ${Y + 2} ${Z - 1} minecraft:stone`);
+    await cmd(`fill ${X} ${Y} ${Z + 1} ${X + 3} ${Y + 2} ${Z + 1} minecraft:stone`);
+    await cmd(`give TestA_corner minecraft:stone_sword 1`);
+    await sleep(1500);
+    await cmd(`damage TestA_corner 13 minecraft:generic`);
+    await cmd(`summon minecraft:husk ${X + 2.5} ${Y} ${Z + 0.5}`);
+    let dead = false;
+    for (let i = 0; i < 45 && !dead && !a.isDead; i++) {
+      await sleep(1000);
+      dead = !/passed/i.test(await cmd(`execute if entity @e[type=husk,x=${X - R},y=${Y - 3},z=${Z - R},dx=${2 * R},dy=14,dz=${2 * R}]`));
+    }
+    const survived = !a.isDead;
+    await stopAgents([a]);
+    return { ok: dead && survived, why: `husk killed=${dead}, bot alive=${survived}` };
+  },
+
   /** Starving agent with no food hunts a cow by itself. */
   async starving() {
     const [a] = await startAgents([{ name: 'TestA_food', x: X, z: Z }]);
