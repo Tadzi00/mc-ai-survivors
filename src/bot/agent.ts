@@ -1060,7 +1060,15 @@ export class BotAgent {
       hasWeapon: bot.inventory.items().some((i) => /_sword$|_axe$/.test(i.name)),
       isNight: bot.time.timeOfDay >= 12_600 && bot.time.timeOfDay <= 23_000,
       isSleeping: bot.isSleeping,
-      bedKnown: !!this.memory.place('bed'),
+      // Only a bed the sleep skill can use (within 32 blocks), and not while sleep waits out its cooldown:
+      // a far-away remembered bed made "sleep" fail every minute and blocked the night shelter reflex,
+      // so the bot stood still in the open all night.
+      bedKnown:
+        Date.now() - (this.reflexLastRun.get('sleep') ?? 0) >= REFLEX_COOLDOWN_MS.sleep! &&
+        (['bed', 'spare_bed'] as const).some((k) => {
+          const b = this.memory.place(k);
+          return !!b && Math.hypot(b.x - bot.entity.position.x, b.z - bot.entity.position.z) <= 32;
+        }),
       // Cold = the air is freezing OR our body is already getting cold (shivering/hypothermia).
       cold:
         t && this.deps.seasons.enabled
