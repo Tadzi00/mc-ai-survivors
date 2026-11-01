@@ -7,6 +7,7 @@ import { SeasonsApi } from '../dist/rcon/server.js';
 import { BotAgent } from '../dist/bot/agent.js';
 import { HomeRegistry, ProtectedAreas, Roster } from '../dist/bot/chat.js';
 import { rmSync } from 'node:fs';
+import { Village } from '../dist/bot/village.js';
 
 const config = loadConfig();
 config.paths = { ...config.paths, state: './state/agent-test', logs: './logs/agent-test' };
@@ -48,13 +49,15 @@ async function cleanup() {
 
 /** Starts agents, waits for spawn, teleports them to their start spots. */
 async function startAgents(specs) {
-  const deps = { config, llm, seasons: new SeasonsApi(rcon), roster: new Roster(), rcon, protectedAreas: new ProtectedAreas(), homes: new HomeRegistry() };
+  rmSync('./state/agent-test/village.json', { force: true });
   const agents = [];
+  const deps = { config, llm, seasons: new SeasonsApi(rcon), roster: new Roster(), rcon, protectedAreas: new ProtectedAreas(), homes: new HomeRegistry(), village: new Village('./state/agent-test'), peers: () => agents };
   for (const s of specs) {
     await cmd(`whitelist add ${s.name}`);
     let spawned;
     const ready = new Promise((r) => (spawned = r));
     // On death stop right away: a respawned test bot would wander the real world.
+    rmSync(`./state/agent-test/bots/${s.name}.json`, { force: true });
     const a = new BotAgent(s.name, 'smart', deps, { onSpawn: () => spawned(), onDeath: (ag) => ag.stop(), onDisconnect: () => {} }, null);
     a.start();
     await Promise.race([ready, sleep(20_000)]);
@@ -200,7 +203,7 @@ const scenarios = {
     a.memory.discover('trees', { x: X + 30, y: Y, z: Z });
     a.memory.learn('gather iron_ore: need a stone pickaxe to mine iron');
     a.mentor(b);
-    await sleep(1500);
+    for (let i = 0; i < 20 && (b.memory.data.lessons ?? []).length === 0; i++) await sleep(1000);
     const m = b.memory.data;
     const village = m.places.village;
     const chest = Object.values(m.storage ?? {})[0];
@@ -209,6 +212,115 @@ const scenarios = {
     await stopAgents([a, b]);
     const ok = !!village && chest?.items?.iron_ingot === 5 && trees && lesson;
     return { ok, why: `village=${!!village} chest=${JSON.stringify(chest?.items)} trees=${trees} lesson=${lesson}` };
+  },
+
+  /** Two bots in earshot swap what the other doesn't know (said aloud, stored in memory). */
+  async meeting() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_meet', x: X, z: Z },
+      { name: 'TestB_meet', x: X + 6, z: Z },
+    ]);
+    a.memory.discover('iron_ore', { x: X + 40, y: Y - 20, z: Z });
+    a.memory.learn('gather iron_ore: need a stone pickaxe to mine iron');
+    b.memory.discover('cows', { x: X - 30, y: Y, z: Z + 10 });
+    let ok = false;
+    for (let i = 0; i < 20 && !ok; i++) {
+      await sleep(1000);
+      const bi = (b.memory.data.discoveries ?? []).some((d) => d.what === 'iron_ore');
+      const ac = (a.memory.data.discoveries ?? []).some((d) => d.what === 'cows');
+      ok = bi && ac;
+    }
+    const lesson = (b.memory.data.lessons ?? []).some((l) => /stone pickaxe/.test(l));
+    await stopAgents([a, b]);
+    return { ok: ok && lesson, why: `B learned iron+lesson, A learned cows: ${ok} lesson=${lesson}` };
+  },
+
+  /** B asks where cows are; A knows and answers; B remembers the answer. */
+  async ask_answer() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_ask', x: X, z: Z },
+      { name: 'TestB_ask', x: X + 5, z: Z },
+    ]);
+    a.memory.discover('cows', { x: X - 60, y: Y, z: Z + 20 });
+    a.lastMeeting.set('TestB_ask', Date.now()); // they already met: the answer must come from the question
+    await sleep(1500);
+    b.bot.chat('Anyone know where cows are?');
+    let got = false;
+    for (let i = 0; i < 15 && !got; i++) {
+      await sleep(1000);
+      got = (b.memory.data.discoveries ?? []).some((d) => d.what === 'cows' && d.x === X - 60);
+    }
+    await stopAgents([a, b]);
+    return { ok: got, why: `B learned where cows are from A's answer: ${got}` };
+  },
+
+  /** A newborn may not dig until taught; the mentor walks over, teaches 5 lessons, frees it. */
+  async apprentice() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_teach', x: X, z: Z },
+      { name: 'TestB_born', x: X + 18, z: Z },
+    ]);
+    for (const l of ['gather iron_ore: need a stone pickaxe', 'Taught by TAdzi00: diamonds are below y 16', 'At night in the open, dig 3 down', 'craft torch: need coal', 'Conclusion: cows live on grass', 'Conclusion: lava is deadly']) a.memory.learn(l);
+    a.memory.setPlace('home', { x: X, y: Y, z: Z });
+    b.startApprenticeship(300);
+    let refused = false;
+    try {
+      await b.bot.dig(b.bot.blockAt(b.bot.entity.position.offset(1, -1, 0)), true);
+    } catch (e) {
+      refused = /newborn/.test(String(e));
+    }
+    a.mentor(b);
+    for (let i = 0; i < 40 && b.isApprentice(); i++) await sleep(1000);
+    const freed = !b.isApprentice();
+    const taught = (b.memory.data.lessons ?? []).filter((l) => /^From TestA_teach/.test(l)).length;
+    const ap = a.position(), bp = b.position();
+    const walked = ap && bp ? ap.distanceTo(bp) <= 9 : false;
+    await stopAgents([a, b]);
+    return { ok: refused && freed && taught >= 5 && walked, why: `dig refused=${refused} freed=${freed} lessons taught=${taught} mentor walked over=${walked}` };
+  },
+
+  /** A writes a library book (chest created in the village); B reads it and learns. */
+  async library() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_lib', x: X, z: Z },
+      { name: 'TestB_lib', x: X + 3, z: Z + 3 },
+    ]);
+    a.deps.village.found({ x: X, y: Y, z: Z }, 'TestA_lib');
+    for (const l of ['gather iron_ore: need a stone pickaxe', 'Taught by TAdzi00: diamonds are below y 16', 'craft torch: need coal']) a.memory.learn(l);
+    a.memory.discover('iron_ore', { x: X + 50, y: Y - 30, z: Z });
+    await cmd('give TestA_lib minecraft:writable_book 1');
+    await cmd('give TestA_lib minecraft:chest 1');
+    await sleep(1000);
+    a.queueFirst({ skill: 'library_write', args: {}, thought: 'order from test' });
+    for (let i = 0; i < 40 && !a.deps.village.data.library; i++) await sleep(1000);
+    await sleep(4000);
+    b.queueFirst({ skill: 'library_read', args: {}, thought: 'order from test' });
+    let lessons = 0, iron = false;
+    for (let i = 0; i < 40; i++) {
+      await sleep(1000);
+      lessons = (b.memory.data.lessons ?? []).filter((l) => /^Library/.test(l)).length;
+      iron = (b.memory.data.discoveries ?? []).some((d) => d.what === 'iron_ore');
+      if (lessons >= 3 && iron) break;
+    }
+    await stopAgents([a, b]);
+    return { ok: lessons >= 3 && iron, why: `library=${JSON.stringify(a.deps.village.data.library)} B learned ${lessons} lessons, iron=${iron}` };
+  },
+
+  /** News shouts reach a bot far away, which stores the find by kind. */
+  async news() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_news', x: X - 20, z: Z },
+      { name: 'TestB_news', x: X + 20, z: Z },
+    ]);
+    await sleep(1500);
+    a.news(`Found iron ore at ${X + 7} ${Y - 25} ${Z + 7}`);
+    let got = false;
+    for (let i = 0; i < 15 && !got; i++) {
+      await sleep(1000);
+      got = (b.memory.data.discoveries ?? []).some((d) => d.what === 'iron_ore' && d.x === X + 7);
+    }
+    await stopAgents([a, b]);
+    return { ok: got, why: `B stored the shouted iron: ${got}` };
   },
 
   /** A announces a chest deposit within earshot; B's chest memory updates from hearing it. */

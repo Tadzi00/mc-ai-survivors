@@ -29,6 +29,28 @@ export class LifecycleManager {
     private readonly deps: AgentDeps,
   ) {
     this.jsonl = new JsonlLog(config.paths.logs, 'orchestrator');
+    deps.peers = () => [...this.agents.values()];
+  }
+
+  /** Current Minecraft day as seen by any living bot. */
+  private worldDay(): number | undefined {
+    for (const a of this.agents.values()) {
+      const d = a.worldDay();
+      if (d !== undefined && !a.isDead) return d;
+    }
+    return undefined;
+  }
+
+  /** Is a living, settled (not newborn) bot within `birthNeedsBotWithin` blocks of the bed? */
+  private botNear(bed: BedPos): boolean {
+    const r = this.config.population.birthNeedsBotWithin;
+    if (!r) return true;
+    for (const a of this.agents.values()) {
+      if (a.isDead || a.isApprentice()) continue;
+      const p = a.position();
+      if (p && Math.hypot(p.x - bed.x, p.y - bed.y, p.z - bed.z) <= r) return true;
+    }
+    return false;
   }
 
   start(): void {
@@ -75,6 +97,7 @@ export class LifecycleManager {
           return undefined;
         });
       }
+      const day = this.worldDay();
       const decision = decideSpawn({
         aliveCount: alive.length,
         maxBots: p.maxBots,
@@ -82,6 +105,9 @@ export class LifecycleManager {
         reseedWhenExtinct: p.reseedWhenExtinct,
         everSpawned: this.state.bots.length > 0,
         canSpawn,
+        birthsToday: day === undefined ? 0 : this.state.bots.filter((b) => b.bornDay === day && b.namedBy !== 'seed').length,
+        maxBirthsPerDay: p.maxBirthsPerDay,
+        botNearBed: (bed) => this.botNear(bed),
       });
       if (decision.action === 'none') {
         log('debug', 'life', `no spawn: ${decision.reason}${canSpawn?.missing.length ? ` (missing beds: ${canSpawn.missing.join(',')})` : ''}`);
@@ -98,28 +124,47 @@ export class LifecycleManager {
         return;
       }
       const tier = assignTier(alive.map((b) => b.tier), p.smartSlots);
-      const name = this.peekName();
+      const named = await this.nameByElder();
+      const name = named?.name ?? this.peekName();
       const ok = await this.bridge.assign(name, decision.bed);
       if (!ok) {
         log('warn', 'life', `could not assign bed ${JSON.stringify(decision.bed)} to ${name}`);
         return;
       }
-      log('info', 'life', `shelter rule met -> newborn ${name} (${tier}) at bed ${decision.bed.x},${decision.bed.y},${decision.bed.z}`);
-      this.birth(tier, decision.bed, name);
+      log('info', 'life', `shelter rule met -> newborn ${name} (${tier}) at bed ${decision.bed.x},${decision.bed.y},${decision.bed.z}${named ? ` - named by ${named.by}: ${named.why}` : ''}`);
+      this.birth(tier, decision.bed, name, named?.by);
+      if (named) this.agents.get(named.by)?.news(`Welcome ${name}! ${named.why}`.slice(0, 90));
     } finally {
       this.ticking = false;
     }
+  }
+
+  /** The oldest living bot picks the newborn's name (model + memories); undefined -> numbered name. */
+  private async nameByElder(): Promise<{ name: string; why: string; by: string } | undefined> {
+    if (!this.config.population.namedByElder) return undefined;
+    const elder = this.state
+      .alive()
+      .sort((a, b) => a.bornAt.localeCompare(b.bornAt))
+      .map((r) => this.agents.get(r.name))
+      .find((a) => a && !a.isDead);
+    if (!elder) return undefined;
+    const dead = this.state.bots.filter((b) => b.status === 'dead').map((b) => ({ name: b.name, cause: b.deathCause }));
+    const r = await Promise.race([
+      elder.proposeName(dead, this.state.usedNames()),
+      new Promise<undefined>((res) => setTimeout(() => res(undefined), 60_000)),
+    ]).catch(() => undefined);
+    return r ? { ...r, by: elder.name } : undefined;
   }
 
   private peekName(): string {
     return nextBotName(this.config.population.namePrefix, this.state.nameCounter, this.state.usedNames()).name;
   }
 
-  private birth(tier: Tier, bed: BedPos | null, presetName?: string): void {
+  private birth(tier: Tier, bed: BedPos | null, presetName?: string, namedBy?: string): void {
     const n = nextBotName(this.config.population.namePrefix, this.state.nameCounter, this.state.usedNames());
     const name = presetName ?? n.name;
-    this.state.nameCounter = n.counter;
-    this.state.add({ name, tier, status: 'alive', bornAt: new Date().toISOString(), bed });
+    if (!presetName) this.state.nameCounter = n.counter;
+    this.state.add({ name, tier, status: 'alive', bornAt: new Date().toISOString(), bed, bornDay: this.worldDay(), namedBy: bed ? namedBy : 'seed' });
     this.jsonl.write('birth', { name, tier, bed });
     this.fresh.add(name);
     if (bed && this.config.population.spawnAtBed) this.newborns.set(name, bed);
@@ -170,8 +215,16 @@ export class LifecycleManager {
   }
 
   private async onSpawn(agent: BotAgent): Promise<void> {
-    if (this.fresh.delete(agent.name)) setTimeout(() => this.assignMentor(agent), 4_000);
     const bed = this.newborns.get(agent.name);
+    if (this.fresh.delete(agent.name)) {
+      if (bed) {
+        // Born in a bed: that is home, and it waits for a teammate to teach it before it may break blocks.
+        agent.memory.setPlace('home', { x: bed.x, y: bed.y, z: bed.z, note: 'where I was born' });
+        agent.memory.setPlace('bed', { x: bed.x, y: bed.y, z: bed.z });
+        agent.startApprenticeship(this.config.population.apprenticeSeconds);
+      }
+      setTimeout(() => this.assignMentor(agent), 4_000);
+    }
     if (!bed) return;
     this.newborns.delete(agent.name);
     await this.bridge.placeAtBed(agent.name, bed).catch((e: unknown) => log('warn', 'life', `placeAtBed failed: ${String(e)}`));
@@ -185,6 +238,20 @@ export class LifecycleManager {
     await this.bridge.unassign(agent.name).catch(() => undefined);
     const alive = this.state.alive().length;
     log('warn', 'life', `${agent.name} is gone forever (${cause}). ${alive} alive.`);
+    // The nearest living bot spreads the news (where, and what killed them).
+    const where = agent.position() ?? this.deps.roster.get(agent.name, 120_000);
+    let teller: BotAgent | undefined;
+    let best = Infinity;
+    for (const a of this.agents.values()) {
+      const p = a.position();
+      if (a.isDead || !p || !where) continue;
+      const d = Math.hypot(p.x - where.x, p.z - where.z);
+      if (d < best) {
+        best = d;
+        teller = a;
+      }
+    }
+    if (teller && where) teller.news(`${cause.replace(agent.name, agent.name.replace(this.config.population.namePrefix, ''))} near ${Math.floor(where.x)} ${Math.floor(where.y)} ${Math.floor(where.z)}. Careful!`.slice(0, 100));
     if (alive === 0) void this.tick();
   }
 

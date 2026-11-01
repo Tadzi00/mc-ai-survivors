@@ -512,6 +512,27 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots never dig blocks within 4 blocks of their home (pathfinder `exclusionAreasBreak`), so they don't
   tunnel out of their own shelter.
+- **Civilisation: knowledge flow** (`bot/society.ts`, pure + tested; agent `socialTick` every 4 s):
+  - *Meetings*: two bots within `chatRange` swap what the other lacks (village, the 2 most valuable finds,
+    1 lesson), said aloud and stored with the source. A meeting only counts (10 min cooldown per pair) when
+    something was told.
+  - *News shouts* (queued, sent when the shout cooldown allows, cut to `shout.maxWords`): valuable ore found
+    (once per 64-block area), village founded, a death (told by the nearest living bot, with where/what).
+  - *Ask & answer*: a failed search shouts "Anyone know where X are?" (once per 10 min per thing); anyone
+    who knows answers (say if in earshot, else shout); heard places with coordinates become finds.
+  - *Less chatter*: the model's "say" is dropped when it is narration ("Heading to gather logs") or close to
+    something said in the last 5 min; answers to players are always sent.
+  - *Village library* (`library_write` / `library_read`, chest in `village.json`): best lessons + finds as
+    a written book; newborns read it after being taught; bots with a book and quill add to it (daytime,
+    in the village, every 30 min at most).
+- **Births** (`population.*`): at most `maxBirthsPerDay` (2) per MC day; only at a bed with a settled bot
+  within `birthNeedsBotWithin` (24) blocks; the newborn's home and bed are its birth bed; it is an
+  *apprentice* (`apprenticeSeconds`, 300): no digging, no planning (answers only) until the nearest bot has
+  walked over and taught it its 5 most valuable lessons (`topLessons`: player-taught > real failures >
+  conclusions), the village, utilities and best finds. Then it reads the library.
+- **Names**: the oldest living bot names the newborn with the model from its memories (often honouring a
+  dead friend: Kira -> Kiro). `cleanBotName`: letters only, `Surv_` prefix, never any name that ever
+  lived (a taken name gets a close variant). Bridge `protection.bot-name-pattern` is `^Surv_[A-Za-z0-9]+$`.
 - **Trials** (`scripts/trial.mjs`): fresh full bots with the REAL model get materials and a plain-language
   order on the test platform; results are checked on the server and the bot's decisions printed
   (shelter_beds, chest_smelt, tools, village_second, book, sign). Run after behaviour changes; they found most

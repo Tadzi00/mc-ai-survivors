@@ -238,6 +238,25 @@ const trials = {
     return { ok, used, why: `sign: ${signText.slice(0, 160)} | reader read_signs=${readIt} | answer: ${answer.slice(0, 200)}`, name };
   },
 
+  /** The elder names a newborn with the real model (5 tries: never a used name). */
+  async naming() {
+    const name = 'TestT_elder';
+    const { a } = await startAgent(name);
+    a.memory.learn('DEATH: Surv_Kira was slain by Zombie near 10 64 10');
+    const dead = [{ name: 'Surv_Kira', cause: 'Surv_Kira was slain by Zombie' }, { name: 'Surv_Marek', cause: 'Surv_Marek drowned' }, { name: 'Surv_71', cause: 'fell' }];
+    const used = new Set(['Surv_Kira', 'Surv_Marek', 'Surv_71', 'Surv_79']);
+    const names = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await a.proposeName(dead, used);
+      names.push(r ? `${r.name} (${r.why})` : 'none');
+      if (r) used.add(r.name);
+    }
+    a.stop();
+    await cmd(`whitelist remove ${name}`);
+    const okNames = names.filter((n) => n !== 'none');
+    return { ok: okNames.length >= 4, used: 0, why: names.join(' | '), name };
+  },
+
   /** Raw iron in a chest; smelt it. */
   async chest_smelt() {
     const name = 'TestT_smelt';

@@ -128,7 +128,24 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
       await transitHomeDoor(ctx, target.position); // leave the house through the door, not the floor
       // Blocks with harvestTools (stone, ores) drop nothing without a suitable tool.
       if (target.harvestTools && !Object.keys(target.harvestTools).some((id) => bot.inventory.items().some((i) => String(i.type) === id))) {
-        return `need a better tool to harvest ${target.name} (craft a pickaxe)`;
+        // Make the tool ourselves when we can (like smelt makes its furnace): the model kept asking for
+        // "gather coal" without a pickaxe and "craft stone_pickaxe" without cobblestone, round and round.
+        const tools = Object.keys(target.harvestTools).map((id) => bot.registry.items[Number(id)]?.name ?? '');
+        const order = ['stone_pickaxe', 'wooden_pickaxe', 'iron_pickaxe'].filter((t) => tools.includes(t));
+        let made = '';
+        for (const t of order) {
+          const r = await craftSkill(ctx, { item: t, count: 1 });
+          if (r.startsWith('crafted')) {
+            made = t;
+            break;
+          }
+        }
+        if (!made) {
+          const need = tools.includes('wooden_pickaxe') ? 'a wooden_pickaxe (3 planks + 2 sticks)' : `a ${tools.find((t) => /stone|iron/.test(t)) ?? 'better pickaxe'}`;
+          return `need ${need} to harvest ${target.name}; could not make one (get planks${tools.includes('wooden_pickaxe') ? '' : '/cobblestone'})`;
+        }
+        ctx.log(`made a ${made} to harvest ${target.name}`);
+        continue;
       }
       const before = counter();
       try {
@@ -471,7 +488,10 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
     }
   }
   // Explain what's actually missing: ingredients we don't have enough of, and/or the table problem.
-  const any = bot.recipesAll(item.id, null, true)[0];
+  // Explain with the common variant: stone tools listed "cobbled_deepslate" (a rarer recipe) and the model
+  // never learned it needs cobblestone (and a wooden pickaxe to mine it).
+  const all = bot.recipesAll(item.id, null, true);
+  const any = all.find((r) => r.delta.some((d) => /cobblestone|_planks$/.test(bot.registry.items[d.id]?.name ?? ''))) ?? all[0];
   if (!any) return `no known recipe for ${item.name}`;
   const have = (id: number): number => {
     const n = bot.registry.items[id]?.name ?? '';
@@ -484,6 +504,9 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
     .filter((d) => d.count < 0 && have(d.id) < -d.count)
     .map((d) => `${-d.count - have(d.id)} more ${genericWood(bot.registry.items[d.id]?.name ?? String(d.id))}`);
   const problems = [...missing];
+  if (missing.some((m) => /cobblestone/.test(m)) && !bot.inventory.items().some((i) => /_pickaxe$/.test(i.name))) {
+    problems.push('cobblestone comes from mining stone, which needs a wooden_pickaxe first (3 planks + 2 sticks)');
+  }
   if (any.requiresTable && tableProblem.get(bot)) problems.push(`crafting table: ${tableProblem.get(bot)}`);
   if (problems.length === 0) problems.push('unknown reason (try again)');
   return `cannot craft ${item.name}: ${problems.join('; ')}`;

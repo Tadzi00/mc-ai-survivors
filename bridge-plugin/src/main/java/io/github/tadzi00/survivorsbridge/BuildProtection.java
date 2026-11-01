@@ -55,7 +55,7 @@ public final class BuildProtection implements Listener {
 
     public void configure(ConfigurationSection c) {
         enabled = c == null || c.getBoolean("enabled", true);
-        botPattern = Pattern.compile(c == null ? "^Surv_\\d+$" : c.getString("bot-name-pattern", "^Surv_\\d+$"));
+        botPattern = Pattern.compile(c == null ? "^Surv_[A-Za-z0-9]+$" : c.getString("bot-name-pattern", "^Surv_[A-Za-z0-9]+$"));
     }
 
     private static String key(Block b) {

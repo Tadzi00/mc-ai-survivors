@@ -156,7 +156,10 @@ export function buildObservation(o: ObservationInput): string {
       });
     lines.push(
       `VILLAGE at ${fmtPos(v.center)} (${Math.round(distance(me, v.center))}m): all homes and new buildings go here (build_shelter builds next to the others). ` +
-        `Buildings: ${bs.join('; ') || 'none yet'}.`,
+        `Buildings: ${bs.join('; ') || 'none yet'}.` +
+        (v.data.library
+          ? ` LIBRARY chest at ${fmtPos(v.data.library)}: library_read to learn what the tribe wrote, library_write to add your knowledge (needs book and quill).`
+          : ' No library yet: library_write (needs a book and quill) starts one.'),
     );
   }
   // Written knowledge around: sign texts nearby and the books we carry (title + start), so the model can

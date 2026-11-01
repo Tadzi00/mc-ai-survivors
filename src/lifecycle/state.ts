@@ -11,6 +11,10 @@ export interface BotRecord {
   diedAt?: string;
   deathCause?: string;
   bed?: BedPos | null;
+  /** Minecraft day of birth (for the births-per-day limit). */
+  bornDay?: number;
+  /** Who named this bot and why. */
+  namedBy?: string;
 }
 
 export interface OrchestratorStateData {

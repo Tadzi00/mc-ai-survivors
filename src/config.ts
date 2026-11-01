@@ -79,6 +79,14 @@ export const ConfigSchema = z
         /** Run `whitelist add <bot>` over RCON before each bot connects. */
         autoWhitelist: z.boolean().default(true),
         graceOnSeed: z.boolean().default(true),
+        /** At most this many births per Minecraft day (0 = no limit). */
+        maxBirthsPerDay: z.number().int().min(0).default(2),
+        /** A newborn is only born at a bed with a living bot within this many blocks (0 = anywhere). */
+        birthNeedsBotWithin: z.number().min(0).default(24),
+        /** The oldest living bot names newborns with the model (else Surv_NN). */
+        namedByElder: z.boolean().default(true),
+        /** Newborns cannot break blocks until taught (or this many seconds pass). */
+        apprenticeSeconds: z.number().min(0).default(300),
       })
       .default({}),
     /** Blocks; bots only "hear" chat from players within this distance. */

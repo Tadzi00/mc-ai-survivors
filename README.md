@@ -213,6 +213,7 @@ MIT © 2026 Tadzi00
 | `/msg Surv_06 gather 20 stone` | Other instructions become an ORDER at the top of its view for 5 min |
 | `/msg Surv_06 !think` | The bot whispers its last thought, current action, plan and goal |
 | `/msg Surv_06 !status` | Health, food, position, inventory |
+| (automatic) | Bots in earshot swap finds and lessons, shout news (ore, deaths, village) and answer "anyone know where X are?"; newborns are taught and named by the elders |
 | `/msg Surv_06 !memory` | Saved places (home, bed, bunker...), current order, known chests, finds by kind, lesson count |
 | `/msg Surv_06 !lessons` | All lessons, numbered |
 | `/msg Surv_06 !finds [kind]` | Remembered finds nearest first, e.g. `!finds iron` |

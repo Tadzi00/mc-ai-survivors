@@ -20,4 +20,4 @@ protection:
   # Bots can't break blocks placed by humans or other bots, nor anything inside /survivors protect areas.
   enabled: true
   # Which players are bots (matched against the player name).
-  bot-name-pattern: '^Surv_\d+$'
+  bot-name-pattern: '^Surv_[A-Za-z0-9]+$'

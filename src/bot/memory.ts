@@ -21,6 +21,10 @@ export interface MemoryData {
   storage?: Record<string, Chest>;
   /** Outlines of shelters/rooms this bot built (outer walls), for extend_shelter. */
   shelters?: Array<{ x0: number; z0: number; x1: number; z1: number; y0: number }>;
+  /** Newborn: may not break blocks until taught (epoch ms; 0/undefined = free). */
+  apprenticeUntil?: number;
+  /** One-time news this bot already announced (keys). */
+  announced?: string[];
   /** The model's last few thoughts (why it chose what it did), newest last. */
   thoughts?: Array<{ text: string; at: number; plan?: string }>;
   /** A player's standing order, kept across restarts until it expires (epoch ms). */

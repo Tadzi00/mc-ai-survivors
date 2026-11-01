@@ -60,6 +60,8 @@ export const SkillArgs = {
     title: z.string().min(1).max(32),
     pages: z.array(z.string().min(1).max(256)).min(1).max(10),
   }),
+  library_write: z.object({}),
+  library_read: z.object({}),
   read_book: z.object({
     slot: z.coerce.number().int().min(0).max(45).optional(),
     source: z.enum(['inventory', 'lectern']).default('inventory'),
@@ -92,7 +94,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   plant_sapling: 'plant_sapling {count} plant saplings on grass/dirt nearby (new trees = wood later)',
   add_door: 'add_door {} put a door into your shelter if it has none (crafts one from 6 planks)',
   place_torch: 'place_torch {} place a torch next to you (light + heat)',
-  heat_room: 'heat_room {} inside your shelter: add torches until the room is warm (a 5x5 room needs ~4)',
+  heat_room: 'heat_room {} inside your shelter: add torches until the room is heading to a comfortable temperature (often 1 is enough)',
   farm: 'farm {action:"till"|"plant"|"harvest",crop}',
   chest_store: 'chest_store {items:["oak_log:10","cobblestone"]} put items into nearest chest',
   chest_take: 'chest_take {items:["iron_ingot:5"]} take items from nearest chest; {items:["list"]} just looks inside',
@@ -106,12 +108,14 @@ export const SKILL_HELP: Record<SkillName, string> = {
   read_signs: 'read_signs {radius} read nearby signs',
   write_book: 'write_book {title,pages[]} write & sign a book (needs writable_book) - lasting knowledge',
   read_book: 'read_book {slot?,source:"inventory"|"lectern"}',
+  library_write: 'library_write {} write your best lessons and finds into a book for the village library (needs book and quill)',
+  library_read: 'library_read {} read every book in the village library chest and learn from them',
   remember: 'remember {note} save a note to your long-term memory',
   set_goal: 'set_goal {text} set your long-term goal',
   wait: 'wait {seconds}',
 };
 
-const SMART_ONLY: ReadonlySet<SkillName> = new Set(['set_goal', 'write_book', 'write_sign', 'smelt', 'place_block']);
+const SMART_ONLY: ReadonlySet<SkillName> = new Set(['set_goal', 'write_book', 'write_sign', 'smelt', 'place_block', 'library_write']);
 
 export function skillsForTier(tier: Tier): SkillName[] {
   return tier === 'smart' ? [...SKILL_NAMES] : SKILL_NAMES.filter((s) => !SMART_ONLY.has(s));

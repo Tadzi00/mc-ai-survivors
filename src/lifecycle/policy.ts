@@ -19,6 +19,11 @@ export interface SpawnInput {
   everSpawned: boolean;
   /** Bridge answer; undefined when the bridge could not be queried. */
   canSpawn?: CanSpawnResult;
+  /** Births so far in the current Minecraft day, and the daily limit (0 = no limit). */
+  birthsToday?: number;
+  maxBirthsPerDay?: number;
+  /** Is a living bot near that free bed (to welcome and teach the newborn)? */
+  botNearBed?: (bed: BedPos) => boolean;
 }
 
 export function decideSpawn(i: SpawnInput): SpawnDecision {
@@ -32,6 +37,9 @@ export function decideSpawn(i: SpawnInput): SpawnDecision {
   if (!i.canSpawn) return { action: 'none', reason: 'bridge_unavailable' };
   if (!i.canSpawn.canSpawn) return { action: 'none', reason: i.canSpawn.reason || 'bridge_says_no' };
   if (!i.canSpawn.freeValidBed) return { action: 'none', reason: 'no_free_valid_bed' };
+  if (i.maxBirthsPerDay && (i.birthsToday ?? 0) >= i.maxBirthsPerDay) return { action: 'none', reason: 'daily_birth_limit' };
+  // A newborn needs someone to meet it: no births at a bed nobody is near.
+  if (i.botNearBed && !i.botNearBed(i.canSpawn.freeValidBed)) return { action: 'none', reason: 'nobody_near_the_bed' };
   return { action: 'spawn', bed: i.canSpawn.freeValidBed, reason: 'shelter_rule_met' };
 }
 

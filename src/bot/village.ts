@@ -19,6 +19,8 @@ export interface Building {
 export interface VillageData {
   center?: P3 & { founder: string; at: string };
   buildings: Building[];
+  /** The library chest: written books with the tribe's knowledge. */
+  library?: P3;
 }
 
 /** Bots farther than this from the village centre walk there before building. */
@@ -50,6 +52,11 @@ export class Village {
     this.data.buildings = this.data.buildings.filter((o) => !(o.x0 === b.x0 && o.z0 === b.z0 && o.y0 === b.y0));
     this.data.buildings.push({ ...b, at: new Date().toISOString() });
     if (!this.data.center) this.found({ x: (b.x0 + b.x1) / 2, y: b.y0, z: (b.z0 + b.z1) / 2 }, b.owner);
+    this.save();
+  }
+
+  setLibrary(p: P3): void {
+    this.data.library = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) };
     this.save();
   }
 

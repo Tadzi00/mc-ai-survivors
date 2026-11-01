@@ -40,7 +40,10 @@ before your own goals: plan exactly the steps it needs, don't drift back to the 
 
 const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survive by sharing:
 - Add "say" to your reply to talk WITHOUT spending an action: tell nearby bots what you found (with coordinates),
-  what you learned (your "Lessons learned"), what you plan, or ask them questions. Answer when someone asks you.
+  what you learned (your "Lessons learned"), or ask them questions. Answer when someone asks you.
+  Never narrate ("Heading to gather logs") - that is not said aloud. Say only new, useful things.
+- Bots near you automatically swap finds and lessons; newborns are taught by the nearest bot. Ask with a
+  shout ("Anyone know where cows are?") - whoever knows answers.
 - Agree who does what (one gets wood, one hunts, one builds) and then each do YOUR part; never just follow
   another bot around. Warn about dangers and deaths.
 - LEARN: when something works or keeps failing, draw a general conclusion and put it in "learned"

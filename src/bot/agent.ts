@@ -23,7 +23,7 @@ import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './ac
 import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
 import { enableServerCrafting } from '../skills/impl/resources.js';
 import type { CommandRunner } from '../rcon/rcon.js';
-import { addLesson, cleanLesson, isLessonWorthy, lessonFrom, parseChestReport } from './memory.js';
+import { addLesson, cleanLesson, isLessonWorthy, lessonFrom, lessonSimilarity, parseChestReport } from './memory.js';
 import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
@@ -32,6 +32,7 @@ import { Village } from './village.js';
 import { scanRoom } from '../skills/roomPlan.js';
 import { readBookItem } from '../skills/bookText.js';
 import { relevantKnowledge } from './knowledge.js';
+import { answerFrom, askedFor, cleanBotName, isChatter, kindFromNews, saidRecently, topLessons, whatToShare } from './society.js';
 import { buildObservation, fitObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
@@ -52,6 +53,8 @@ export interface AgentDeps {
   homes?: HomeRegistry;
   /** The one shared village. */
   village?: Village;
+  /** All agents of this orchestrator (for meetings, mentoring, naming). Set by the lifecycle manager. */
+  peers?: () => BotAgent[];
 }
 
 export interface AgentEvents {
@@ -185,6 +188,16 @@ export class BotAgent {
       const seed = home ?? this.memory.place('village');
       if (seed) v.found(seed, this.name);
     }
+    // A bot with a book and quill in the village writes its knowledge into the library (daytime, idle,
+    // at most every 30 min).
+    const day = (bot.time.timeOfDay ?? 0) < 12_000;
+    if (day && v.center && v.contains(bot.entity.position, 24) && countItem(bot, 'writable_book') > 0 && !this.isApprentice() &&
+        !this.forcedStep && !this.planQueue.length && Date.now() - this.lastLibraryWrite > 30 * 60_000 && (this.memory.data.lessons ?? []).length >= 3) {
+      this.lastLibraryWrite = Date.now();
+      this.queueFirst({ skill: 'library_write', args: {}, thought: 'order from myself: add my knowledge to the village library' });
+    }
+    const vc = v.data.center;
+    if (vc && vc.founder === this.name) this.news(`Village founded at ${vc.x} ${vc.y} ${vc.z}. Come live here!`, 'village-founded');
     const mine = this.memory.place('village');
     if (v.center && (!mine || mine.x !== v.center.x || mine.z !== v.center.z)) this.memory.setPlace('village', { ...v.center, note: 'the village' });
     if (!home || v.buildingAt(home)) return;
@@ -204,6 +217,16 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  private skippedInARow = 0;
+  private pendingMentee: BotAgent | undefined;
+  private lastLibraryWrite = 0;
+  private readonly lastMeeting = new Map<string, number>();
+  private newsQueue: string[] = [];
+  /** What this bot said lately (chatter filter). */
+  private saidLog: Array<{ text: string; at: number }> = [];
+  /** Questions we asked (kind -> time) and answers we gave (asker -> time). */
+  private readonly askedAt = new Map<string, number>();
+  private readonly answeredAt = new Map<string, number>();
   /** When the bot last joined (its first position is the world spawn until the server moves it). */
   private spawnedAt = 0;
   /** Steps of the last direct order still to run; when all succeeded the standing order is done. */
@@ -306,7 +329,9 @@ export class BotAgent {
       const dig = bot.dig.bind(bot);
       bot.dig = (async (block: Block, ...rest: unknown[]) => {
         const once = !!block && ALLOWED_DIGS.delete(digKey(block.position));
-        const why = block && !this.allowHomeDig && !once ? this.digForbidden(block.position) : false;
+        const why = this.isApprentice()
+          ? 'you are a newborn: wait until a teammate has taught you'
+          : block && !this.allowHomeDig && !once ? this.digForbidden(block.position) : false;
         if (why) {
           const key = `${block.position.x},${block.position.y},${block.position.z}`;
           const n = (this.refusedDigs.get(key) ?? 0) + 1;
@@ -358,6 +383,7 @@ export class BotAgent {
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = 40; // impossible targets fail fast (not in the typings)
       this.manMade.refresh(bot);
       this.timers.push(setInterval(() => this.villageTick(), 15_000));
+      this.timers.push(setInterval(() => this.socialTick(), 4_000));
       this.timers.push(setInterval(() => {
         if (this.bot?.entity) this.manMade.refresh(this.bot);
         this.refusedDigs.clear();
@@ -409,6 +435,8 @@ export class BotAgent {
           this.pendingAliveReply = { to: username, until: Date.now() + 30_000, via: 'say' };
           this.helpCheckTick();
         }
+        this.answerQuestion(username, message, speakerPos);
+        this.learnFromTalk(username, message);
         // "Stored 15 cobblestone in the chest at x y z" from someone nearby -> update our chest knowledge.
         const report = parseChestReport(message);
         if (report) this.memory.adjustChest(report.pos, report.items, report.sign, username);
@@ -544,7 +572,14 @@ export class BotAgent {
     const all = Object.keys(bot.registry.blocksByName);
     for (const [what, pred] of DISCOVERY_BLOCKS) {
       const b = findBlocks(bot, all.filter(pred), 32, 1)[0];
-      if (b && this.memory.discover(what, b.position)) this.jsonl.write('discovery', { what, pos: b.position });
+      if (b && this.memory.discover(what, b.position)) {
+        this.jsonl.write('discovery', { what, pos: b.position });
+        // Valuable ore is news for everyone (once per ~64-block area).
+        if (/iron_ore|gold_ore|diamond_ore/.test(what)) {
+          const p = b.position;
+          this.news(`Found ${what.replace(/_/g, ' ')} at ${p.x} ${p.y} ${p.z}`, `find:${what}:${Math.round(p.x / 64)},${Math.round(p.z / 64)}`);
+        }
+      }
     }
     // Trees (natural logs only, not house walls), so gather can walk back to wood later.
     const tree = findBlocks(bot, all.filter((n) => /_log$/.test(n) && !n.startsWith('stripped')), 32, 24).find((b) => isTreeLog(bot, b));
@@ -565,6 +600,45 @@ export class BotAgent {
     const text = `${msg}${where ? ` near ${Math.floor(where.x)},${Math.floor(where.y)},${Math.floor(where.z)}` : ''}`;
     this.memory.learn(`DEATH: ${text}`);
     if (where) this.memory.discover(`danger (${msg.slice(m[1]!.length + 1, m[1]!.length + 30)})`, where);
+  }
+
+  /** Someone asked where something is and we know: answer (say if they are in earshot, else shout). */
+  private answerQuestion(from: string, raw: string, speakerPos: { x: number; y: number; z: number } | undefined): void {
+    if (from === this.name || !this.bot?.entity) return;
+    const text = classifyChat(raw).text;
+    const kinds = askedFor(text);
+    if (!kinds.length || Date.now() - (this.answeredAt.get(from) ?? 0) < 60_000) return;
+    const ans = answerFrom(kinds, this.memory.data, speakerPos);
+    if (!ans) return;
+    this.answeredAt.set(from, Date.now());
+    const line = `${from}: ${ans}`;
+    const near = speakerPos && this.bot.entity.position.distanceTo(this.bot.entity.position.clone().set(speakerPos.x, speakerPos.y, speakerPos.z)) <= this.deps.config.chatRange;
+    if (near) this.speakLines([line]);
+    else this.news(line);
+    this.jsonl.write('answered', { to: from, question: text, answer: ans });
+  }
+
+  /** "iron ore at 120 40 -5" said or shouted by someone: remember it as a find of that kind. */
+  private learnFromTalk(from: string, raw: string): void {
+    if (from === this.name) return;
+    const text = classifyChat(raw).text;
+    if (askedFor(text).length) return; // a question, not information
+    const c = /(-?\d{1,6})[ ,]+(-?\d{1,4})[ ,]+(-?\d{1,6})/.exec(text);
+    const kind = kindFromNews(text);
+    if (!c || !kind) return;
+    const pos = { x: Number(c[1]), y: Number(c[2]), z: Number(c[3]) };
+    if (this.memory.discover(kind, pos)) this.jsonl.write('learned_place', { from, kind, pos });
+  }
+
+  /** After a failed search: ask everyone (shout) where to find it, at most once per 10 min per thing. */
+  private askAround(skill: string, args: Record<string, unknown>, result: string): void {
+    const m = /found no reachable (\S+)/.exec(result) ?? /^no (cow|sheep|pig|chicken)s? within/.exec(result);
+    if (!m && !(skill === 'attack' && /none remembered/.test(result))) return;
+    const what = String(m?.[1] ?? args.target ?? args.block ?? '').replace(/_/g, ' ');
+    if (!what) return;
+    if (Date.now() - (this.askedAt.get(what) ?? 0) < 600_000) return;
+    this.askedAt.set(what, Date.now());
+    this.news(`Anyone know where ${what}${/s$/.test(what) ? '' : 's'} are?`);
   }
 
   /** Shouts with coordinates become discoveries; a shouted village becomes the "village" place. */
@@ -599,8 +673,10 @@ export class BotAgent {
     if (/village|town|base|meet/i.test(text) && !this.memory.place('village')) {
       this.memory.setPlace('village', { ...pos, note: `shouted by ${from}` });
       this.memory.learn(`${from} shouted the village location: ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`);
-    } else if (!/help|attack/i.test(text)) {
-      this.memory.discover(`spot shouted by ${from}: ${text.slice(0, 40)}`, pos);
+    } else if (!/help|attack/i.test(text) && !askedFor(text).length) {
+      const kind = kindFromNews(text);
+      if (kind && c) this.memory.discover(kind, pos);
+      else if (!kind) this.memory.discover(`spot shouted by ${from}: ${text.slice(0, 40)}`, pos);
     }
   }
 
@@ -872,29 +948,188 @@ export class BotAgent {
    * Mentor a newborn: hand over home/village, utilities (crafting table, chest + contents, furnace), recent
    * finds and best lessons (in code, reliable), and whisper a welcome summary (visible to players).
    */
+  /** Newborn that may not break blocks yet. */
+  isApprentice(): boolean {
+    return (this.memory.data.apprenticeUntil ?? 0) > Date.now();
+  }
+
+  /** Called by the manager when this bot is born: wait for a teacher (or until the time runs out). */
+  startApprenticeship(seconds: number): void {
+    this.memory.data.apprenticeUntil = Date.now() + seconds * 1000;
+    this.memory.save();
+  }
+
+  /** The teacher is done: free to work. */
+  endApprenticeship(teacher: string): void {
+    this.memory.data.apprenticeUntil = 0;
+    this.memory.learn(`${teacher} is my mentor; ask them when unsure`);
+    this.memory.save();
+    this.lastPlanAt = 0;
+  }
+
+  /** Run this step next (before the current plan). */
+  queueFirst(step: PlannedAction): void {
+    if (this.forcedStep) this.planQueue.unshift(step);
+    else this.forcedStep = step;
+    this.lastPlanAt = 0;
+  }
+
+  /** Mentor a newborn: walk over (social tick), then teach. */
   mentor(student: BotAgent): void {
+    this.pendingMentee = student;
+    this.log('info', `going to welcome and teach ${student.name}`);
+  }
+
+  /**
+   * Teach a newborn standing next to us: our 5 most valuable lessons, the village, utilities and the best
+   * finds; said aloud (they hear it) and written into their memory. Then they may start working.
+   */
+  private teach(student: BotAgent): void {
     const m = this.memory;
-    const lines: string[] = [];
-    const home = m.place('home') ?? m.place('village');
-    if (home) {
-      student.memory.setPlace('village', { ...home, note: `${this.name}'s home` });
-      lines.push(`our home is at ${home.x} ${home.y} ${home.z}`);
+    const sayLines: string[] = [];
+    const v = m.place('village') ?? m.place('home');
+    if (v) {
+      student.memory.setPlace('village', { ...v, note: `${this.name} showed me` });
+      sayLines.push(`Our village is at ${v.x} ${v.y} ${v.z}.`);
     }
-    for (const k of ['crafting_table', 'chest', 'furnace']) {
+    for (const k of ['crafting_table', 'chest', 'furnace', 'library']) {
       const p = m.place(k);
       if (!p) continue;
       student.memory.setPlace(k, p);
-      lines.push(`${k.replace('_', ' ')} at ${p.x} ${p.y} ${p.z}${p.note ? ` (${p.note})` : ''}`);
+      sayLines.push(`${k.replace('_', ' ')} at ${p.x} ${p.y} ${p.z}.`);
     }
-    for (const d of (m.data.discoveries ?? []).slice(-12)) student.memory.discover(d.what, d);
+    const finds = whatToShare(m.data, student.memory.data, 6).filter((i) => i.kind === 'discovery');
+    for (const f of finds) student.memory.discover(f.discovery!.what, f.discovery!);
+    if (finds.length) sayLines.push(`I know: ${finds.map((f) => f.text).join('; ')}.`);
     for (const c of Object.values(m.data.storage ?? {})) student.memory.setChest(c, c.items, this.name);
-    const lessons = (m.data.lessons ?? []).filter((l) => !/^DEATH/.test(l)).slice(-8);
-    for (const l of lessons) student.memory.learn(`From ${this.name}: ${l.replace(/^Taught by \w+: /, '')}`);
-    student.memory.learn(`${this.name} is my mentor; ask them when unsure`);
-    this.jsonl.write('mentor', { student: student.name, shared: lines.length, lessons: lessons.length });
-    this.log('info', `mentoring ${student.name}: ${lines.length} places, ${lessons.length} lessons`);
-    const text = `Welcome ${student.name}! ${lines.join('; ') || 'we have no base yet'}. ${lessons.length ? `Tips: ${lessons.slice(0, 3).join(' | ')}` : ''}`;
-    for (const part of text.match(/.{1,230}(\s|$)/g) ?? [text]) this.bot?.whisper(student.name, part.trim());
+    const lessons = topLessons(m.data.lessons ?? [], 5);
+    for (const l of lessons) student.memory.learn(`From ${this.name}: ${l}`);
+    lessons.forEach((l, i) => sayLines.push(`Lesson ${i + 1}: ${l}`));
+    student.endApprenticeship(this.name);
+    // ...and then reads what the tribe wrote down in the village library.
+    if (this.deps.village?.data.library) student.queueFirst({ skill: 'library_read', args: {}, thought: 'order from my mentor: read the village library' });
+    this.jsonl.write('mentor', { student: student.name, places: sayLines.length - lessons.length, lessons: lessons.length });
+    this.log('info', `taught ${student.name}: ${lessons.length} lessons, ${finds.length} finds`);
+    this.speakLines([`Welcome ${student.name}! Listen, this will keep you alive.`, ...sayLines]);
+  }
+
+  /** Says several lines one after another (spaced so the server does not kick for spam). */
+  private speakLines(lines: string[]): void {
+    const out = lines.flatMap((l) => l.match(/.{1,240}(\s|$)/g)?.map((x) => x.trim()) ?? [l]).slice(0, 10);
+    out.forEach((l, i) => setTimeout(() => {
+      if (this.bot?.entity) {
+        this.bot.chat(l);
+        this.saidLog.push({ text: l, at: Date.now() });
+      }
+    }, i * 1200));
+    this.lastSpokeAt = Date.now();
+  }
+
+  /** Queue a news shout (one per key ever; sent when the shout cooldown allows). */
+  news(text: string, key?: string): void {
+    if (key) {
+      const done = (this.memory.data.announced ??= []);
+      if (done.includes(key)) return;
+      done.push(key);
+      if (done.length > 60) done.splice(0, done.length - 60);
+      this.memory.save();
+    }
+    const max = this.deps.config.shout.maxWords;
+    this.newsQueue.push(text.split(/\s+/).slice(0, max).join(' ')); // shouts are limited to maxWords
+    if (this.newsQueue.length > 6) this.newsQueue.shift();
+  }
+
+  /** Every 4 s: walk to / teach a newborn, swap knowledge with bots in earshot, send queued news. */
+  private socialTick(): void {
+    const bot = this.bot;
+    if (!this.running || !bot?.entity || this.isDead) return;
+    const me = bot.entity.position;
+    // mentoring
+    const st = this.pendingMentee;
+    if (st) {
+      const sp = st.position();
+      if (st.isDead || !sp) this.pendingMentee = undefined;
+      else if (me.distanceTo(sp) <= 8) {
+        this.pendingMentee = undefined;
+        this.teach(st);
+      } else if (!this.forcedStep && this.currentSkill !== 'goto' && !this.reflexBusy && !this.bunker) { // not out of the bunker at night
+        this.forcedStep = { skill: 'goto', args: { x: Math.floor(sp.x), y: Math.floor(sp.y), z: Math.floor(sp.z) }, thought: `order from myself: welcome and teach newborn ${st.name}` };
+        if (this.skillAbort && this.currentSkill) {
+          this.interruptedBy = `going to teach ${st.name}`;
+          this.skillAbort.abort();
+        }
+      }
+    }
+    // meetings: knowledge flows both ways between bots in earshot (initiated by one side of the pair)
+    const range = this.deps.config.chatRange;
+    for (const peer of this.deps.peers?.() ?? []) {
+      if (peer === this || peer.isDead || peer.name < this.name || peer.isApprentice() || this.isApprentice()) continue;
+      const pp = peer.position();
+      if (!pp || me.distanceTo(pp) > range) continue;
+      const key = peer.name;
+      if (Date.now() - (this.lastMeeting.get(key) ?? 0) < 10 * 60_000) continue;
+      const fromMe = this.shareInto(peer);
+      const fromThem = peer.shareInto(this);
+      // Only a real exchange counts as a meeting (an empty one used to block telling news for 10 min).
+      if (fromMe + fromThem) {
+        this.lastMeeting.set(key, Date.now());
+        this.jsonl.write('meeting', { with: peer.name, told: fromMe, heard: fromThem });
+      }
+    }
+    // news
+    if (this.newsQueue.length && tryShout(bot, this.name, this.newsQueue[0]!, this.deps.config.shout)) {
+      this.jsonl.write('news', { text: this.newsQueue.shift() });
+      this.lastSpokeAt = Date.now();
+    }
+  }
+
+  /** Tell `other` what we know and they don't (spoken aloud + stored in their memory). Returns items told. */
+  shareInto(other: BotAgent): number {
+    const items = whatToShare(this.memory.data, other.memory.data, 3, (a, b) => lessonSimilarity(a, b) >= 0.4);
+    for (const it of items) {
+      if (it.place) other.memory.setPlace(it.place.key, { ...it.place.p, note: `from ${this.name}` });
+      if (it.discovery) other.memory.discover(it.discovery.what, it.discovery);
+      if (it.lesson) other.memory.learn(`From ${this.name}: ${it.lesson}`);
+    }
+    if (items.length) this.speakLines([`${other.name}, ${items.map((i) => i.text).join('; ')}.`]);
+    return items.length;
+  }
+
+  /** Current position (for other agents). */
+  position(): Vec3 | undefined {
+    return this.bot?.entity?.position;
+  }
+
+  /** Minecraft day number (for the births-per-day limit). */
+  worldDay(): number | undefined {
+    return this.bot?.time ? Math.floor(Number(this.bot.time.age) / 24000) : undefined;
+  }
+
+  /**
+   * The oldest bot names a newborn with the model, from its memories (it may honour a dead friend with a
+   * changed name). Never a name any bot ever had. Undefined if the model's answer is unusable.
+   */
+  async proposeName(dead: Array<{ name: string; cause?: string }>, used: ReadonlySet<string>): Promise<{ name: string; why: string } | undefined> {
+    const prefix = this.deps.config.population.namePrefix;
+    const { provider, tier } = this.deps.llm.forTier(this.tier);
+    const lessons = (this.memory.data.lessons ?? []).filter((l) => /DEATH|mentor/.test(l)).slice(-5);
+    const prompt =
+      `You are ${this.name}, the oldest of your tribe. A newborn is about to join and you choose its name.\n` +
+      `Bots who died: ${dead.slice(-8).map((d) => `${d.name.replace(prefix, '')} (${d.cause ?? 'unknown'})`).join(', ') || 'none'}.\n` +
+      `Your memories: ${lessons.join(' | ') || 'none'}.\n` +
+      `Pick ONE short first name (letters only, 3-10 letters). You may honour a fallen friend with a slightly changed name ` +
+      `(e.g. Kira -> Kiro). It must not be any of: ${[...used].map((u) => u.replace(prefix, '')).slice(-40).join(', ')}.\n` +
+      `Reply ONLY with JSON: {"name":"...","why":"<max 12 words>"}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await provider.complete({ system: 'You name newborns of a small tribe. Reply with JSON only.', messages: [{ role: 'user', content: prompt }], maxTokens: 60, temperature: 0.9, model: tier.model });
+        const name = cleanBotName(res.text, prefix, used);
+        if (name) return { name, why: /"why"\s*:\s*"([^"]{0,100})"/.exec(res.text)?.[1] ?? '' };
+      } catch {
+        /* fall through */
+      }
+    }
+    return undefined;
   }
 
   private inventoryCounts(): Map<string, number> {
@@ -1361,7 +1596,9 @@ export class BotAgent {
       }
       const inBunkerAtNight = !!this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000;
       // In the bunker at night the bot only thinks when spoken to (answer, read, write - nothing that leaves).
-      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || (inBunkerAtNight && !this.forcedStep && !this.replyTo)) {
+      // A newborn waits for its teacher (it only answers when spoken to).
+      const waitingForTeacher = this.isApprentice() && !this.forcedStep && !this.replyTo;
+      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || waitingForTeacher || (inBunkerAtNight && !this.forcedStep && !this.replyTo)) {
         await sleep(250);
         continue;
       }
@@ -1481,9 +1718,16 @@ export class BotAgent {
           this.log('info', `concluded: ${parsed.learned}`);
           this.jsonl.write('conclusion', { text: parsed.learned });
         }
-        if (parsed.say && this.bot) {
+        // Narration ("Heading to gather 8 logs") and repeats drown real information: only answers and new,
+        // useful things are said aloud.
+        const chatter = !answeringTo && !!parsed.say && (isChatter(parsed.say) || saidRecently(parsed.say, this.saidLog));
+        if (parsed.say && this.bot && chatter) {
+          this.jsonl.write('said_skipped', { text: parsed.say });
+        } else if (parsed.say && this.bot) {
           if (answeringTo) this.bot.whisper(answeringTo, parsed.say);
           else this.bot.chat(parsed.say);
+          this.saidLog.push({ text: parsed.say, at: Date.now() });
+          this.saidLog = this.saidLog.filter((x) => Date.now() - x.at < 600_000);
           this.lastSpokeAt = Date.now();
           this.log('info', `says: ${parsed.say}`);
           this.jsonl.write('said', { text: parsed.say });
@@ -1504,8 +1748,21 @@ export class BotAgent {
     if (prev && prev.n >= 2 && Date.now() - prev.at < 300_000 && !action.thought.startsWith('order from')) {
       const result = `SKIPPED: ${fkey} already failed ${prev.n} times in the last minutes (${prev.why.slice(0, 120)}). Do something different.`;
       this.log('info', result);
+      // The model keeps choosing skipped actions: after 4 in a row run the safe fallback (wood / explore)
+      // so the bot does not stand still (it once "planned" the same skipped plan for minutes).
+      if (++this.skippedInARow >= 4) {
+        this.skippedInARow = 0;
+        this.planQueue = [];
+        if (this.bot) {
+          const fb = fallbackAction(countItem(this.bot, /_log$/));
+          // if the fallback itself keeps failing (no trees here), go somewhere else instead
+          const fbFailed = (this.failures.get(`${fb.skill} ${JSON.stringify(fb.args)}`)?.n ?? 0) >= 2;
+          this.forcedStep = fbFailed ? { thought: 'order from fallback: explore elsewhere', skill: 'explore', args: { distance: 64 } } : { ...fb, thought: `order from fallback: ${fb.thought}` };
+        }
+      }
       return { result, interrupted: false };
     }
+    this.skippedInARow = 0;
     const ac = new AbortController();
     this.skillAbort = ac;
     this.currentSkill = action.skill;
@@ -1567,6 +1824,7 @@ export class BotAgent {
       }
     }
     if (looksFailed(result) && !/^interrupted/.test(result)) {
+      this.askAround(action.skill, action.args, result);
       const f = this.failures.get(fkey);
       this.failures.set(fkey, { n: f && Date.now() - f.at < 300_000 ? f.n + 1 : 1, at: Date.now(), why: result });
     } else if (!looksFailed(result)) {

@@ -8,6 +8,7 @@ import {
 import { exploreSkill, followSkill, goSurfaceSkill, gotoSkill } from './impl/movement.js';
 import { craftSkill, gatherSkill, smeltSkill } from './impl/resources.js';
 import { chestStoreSkill, chestTakeSkill, giveSkill } from './impl/storage.js';
+import { libraryReadSkill, libraryWriteSkill } from './impl/library.js';
 import { attackSkill, eatSkill, sleepSkill } from './impl/survival.js';
 
 type Registry = { [K in SkillName]: (ctx: SkillContext, args: SkillArgsOf<K>) => Promise<string> };
@@ -33,6 +34,8 @@ export const SKILLS: Registry = {
   heat_room: (ctx) => heatRoomSkill(ctx),
   farm: farmSkill,
   chest_store: chestStoreSkill,
+  library_write: libraryWriteSkill,
+  library_read: libraryReadSkill,
   chest_take: chestTakeSkill,
   give: giveSkill,
   check_temperature: checkTemperatureSkill,
