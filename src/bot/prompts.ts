@@ -33,7 +33,10 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Falling more than ~4 blocks hurts; lava kills; you can drown.
 - Saplings (dropped by leaves) grow into new trees: plant them near where you got logs (plant_sapling) so
   wood never runs out.
-- Underground at NIGHT and not hungry? Stay there (wait, mine, craft) until sunrise; the surface is deadly at night.`;
+- Underground at NIGHT and not hungry? Stay there (wait, mine, craft) until sunrise; the surface is deadly at night.
+- Long trips: never swim across an ocean or a wide lake (you tire, drown or lose your way) - walk around it
+  along the shore. Far from the village (100+ blocks) you are on your own: go with a teammate if you can,
+  take food and blocks, shout where you are going, and start back early so you are home before night.`;
 
 const OBEY = `HUMAN PLAYERS (not named Surv_*) are your creators. When your observation shows an ORDER, carry it out
 before your own goals: plan exactly the steps it needs, don't drift back to the checklist until it is done.`;
