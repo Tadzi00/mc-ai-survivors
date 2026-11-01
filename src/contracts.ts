@@ -74,6 +74,9 @@ export const SeasonsReadingSchema = z.object({
   bodyC: z.number().optional(),
   /** Only in `room raw` inside a room: temperature the room air is heading to. */
   equilibriumC: z.number().optional(),
+  /** Day of the current season (1-based) and season length in days (additive v1). */
+  day: z.number().optional(),
+  seasonDays: z.number().optional(),
   stage: z.string().optional(),
 });
 export type SeasonsReading = z.infer<typeof SeasonsReadingSchema>;

@@ -67,3 +67,13 @@ describe('underground', () => {
     expect(progressText({ ...empty })).not.toContain('go_surface');
   });
 });
+
+import { seasonOutlook } from '../src/bot/observation.js';
+
+describe('season outlook', () => {
+  it('warns when winter is close', () => {
+    expect(seasonOutlook('AUTUMN', 12, 14)).toContain('WINTER IS COMING');
+    expect(seasonOutlook('AUTUMN', 2, 14)).not.toContain('WINTER IS COMING');
+    expect(seasonOutlook('SUMMER', 9, 14)).toBe('Calendar: day 9/14 of SUMMER, AUTUMN in 6 day(s).');
+  });
+});

@@ -82,6 +82,7 @@ export function buildObservation(o: ObservationInput): string {
       `Season ${t.season}. Here ${t.tempC.toFixed(1)}C, outside ${t.outsideC.toFixed(1)}C, ${t.comfortable ? 'comfortable' : 'UNCOMFORTABLE'}${t.inside ? `, indoors (${t.sealed ? 'sealed' : 'leaky'})` : ', outdoors'}.`,
     );
     if (t.bodyC !== undefined) lines.push(bodyLine(t.bodyC, t.stage ?? 'COMFORTABLE'));
+    if (t.day !== undefined && t.seasonDays !== undefined) lines.push(seasonOutlook(t.season, t.day, t.seasonDays));
   } else if (!o.seasonsEnabled) {
     lines.push('Seasons: not available on this server.');
   }
@@ -231,4 +232,18 @@ function bodyLine(bodyC: number, stage: string): string {
     default:
       return `${b} - you feel fine.`;
   }
+}
+
+const NEXT_SEASON: Record<string, string> = { SPRING: 'SUMMER', SUMMER: 'AUTUMN', AUTUMN: 'WINTER', WINTER: 'SPRING' };
+
+/** "Day 12/14 of AUTUMN - WINTER in 3 days: ..." so bots can prepare. (Exported for tests.) */
+export function seasonOutlook(season: string, day: number, seasonDays: number): string {
+  const left = Math.max(0, seasonDays - day + 1);
+  const next = NEXT_SEASON[season] ?? '?';
+  const base = `Calendar: day ${day}/${seasonDays} of ${season}, ${next} in ${left} day(s).`;
+  if (next === 'WINTER' && left <= 5) {
+    return `${base} WINTER IS COMING: stock food (cook it), coal/charcoal and torches, finish a SEALED warm shelter with a bed; outdoor farms stop growing.`;
+  }
+  if (season === 'WINTER') return `${base} Stay near heat; go out only by day, with leather armor if you have it.`;
+  return base;
 }
