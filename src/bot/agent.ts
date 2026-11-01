@@ -1,3 +1,4 @@
+import type { Block } from 'prismarine-block';
 import mineflayer, { type Bot } from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
 import { plugin as collectBlockPlugin } from 'mineflayer-collectblock';
@@ -108,6 +109,8 @@ const ANIMALS = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit']);
 const FACE_OFFSETS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
 
 /** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
+/** Skills that build or repair the home on purpose and may dig there (hollowing, doorways, crops). */
+const HOME_BUILD_SKILLS = new Set(['build_shelter', 'extend_shelter', 'add_door', 'place_bed', 'farm']);
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
 
 const BODY_COLD = new Set(['COLD', 'SHIVERING', 'HYPOTHERMIA']);
@@ -168,6 +171,16 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  /** Set while a skill that builds or repairs on purpose runs (it may dig at home). */
+  private allowHomeDig = false;
+
+  /** Blocks the bot must never dig by accident: protected areas, built blocks and their neighbours, homes. */
+  private digForbidden(p: Vec3): boolean {
+    if (this.deps.protectedAreas?.contains(p)) return true;
+    if (this.manMade.touches(p)) return true;
+    const homes = [this.memory.place('home'), ...(this.deps.homes?.all() ?? [])];
+    return homes.some((h) => !!h && Math.abs(p.x - h.x) <= 4 && Math.abs(p.z - h.z) <= 4 && p.y >= h.y - 1 && p.y <= h.y + 4);
+  }
   private lastWhisperAt = 0;
   /** Stuck-while-walking detection (see unstickTick). */
   private moveTrack: Array<{ t: number; x: number; y: number; z: number }> = [];
@@ -242,6 +255,19 @@ export class BotAgent {
       for (const b of Object.values(bot.registry.blocksByName)) {
         if (MAN_MADE_RE.test(b.name)) moves.blocksCantBreak.add(b.id);
       }
+      // Hard safety net under everything: bot.dig refuses blocks of a home, a protected area or next to built
+      // blocks unless a skill that builds/fixes on purpose allows it (ctx.allowHomeDig). A refused dig is logged
+      // with where it came from.
+      const dig = bot.dig.bind(bot);
+      bot.dig = (async (block: Block, ...rest: unknown[]) => {
+        if (block && !this.allowHomeDig && this.digForbidden(block.position)) {
+          const from = (new Error().stack ?? '').split('\n').slice(2, 6).map((l) => l.trim().replace(/^at /, '')).join(' < ');
+          this.log('warn', `refused to dig ${block.name} at ${fmtPos(block.position)} (home/built area) during ${this.currentSkill ?? 'reflex'}: ${from}`);
+          this.jsonl.write('dig_refused', { block: block.name, pos: block.position, skill: this.currentSkill, from });
+          throw new Error(`refused to dig ${block.name}: part of a home or building (use the door)`);
+        }
+        return (dig as (...a: unknown[]) => Promise<void>)(block, ...rest);
+      }) as Bot['dig'];
       // Never dig through our own (or a known) shelter: breaking blocks near home costs a fortune.
       moves.exclusionAreasBreak.push((block: { name: string; position: Vec3 }) => {
         const p = block.position;
@@ -1344,6 +1370,7 @@ export class BotAgent {
         else ac.signal.addEventListener('abort', onAbort, { once: true });
       });
       hardStop.catch(() => undefined);
+      this.allowHomeDig = HOME_BUILD_SKILLS.has(action.skill);
       result = await Promise.race([runSkill(this.makeCtx(ac.signal), action.skill, action.args), hardStop]);
     } catch (e) {
       if (ac.signal.aborted) {
@@ -1359,6 +1386,7 @@ export class BotAgent {
       }
     } finally {
       clearTimeout(timer);
+      this.allowHomeDig = false;
       this.skillAbort = undefined;
       this.currentSkill = undefined;
     }
