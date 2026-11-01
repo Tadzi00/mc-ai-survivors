@@ -697,6 +697,28 @@ export class BotAgent {
     for (const part of text.match(/.{1,230}(\s|$)/g) ?? [text]) this.bot?.whisper(student.name, part.trim());
   }
 
+  /** Snapshot for state/status.json (what this bot is up to right now). */
+  status(): Record<string, unknown> {
+    const bot = this.bot;
+    const p = bot?.entity?.position;
+    return {
+      name: this.name,
+      tier: this.tier,
+      pos: p ? { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) } : null,
+      health: bot ? Math.round(bot.health) : null,
+      food: bot?.food ?? null,
+      doing: this.currentSkill ?? (this.reflexBusy ? 'reflex' : this.planningSince ? 'thinking' : 'idle'),
+      plan: this.planQueue.map((s) => s.skill),
+      lastThought: this.lastThought,
+      goal: this.memory.data.goal,
+      home: this.memory.place('home') ?? null,
+      bed: this.memory.place('bed') ?? null,
+      bunkered: !!this.bunker,
+      body: this.temp?.bodyC !== undefined ? { c: this.temp.bodyC, stage: this.temp.stage } : null,
+      lessons: (this.memory.data.lessons ?? []).length,
+    };
+  }
+
   /** "You failed X 2+ times in a row - why?" so the model draws a conclusion instead of looping. */
   private repeatedFailureNote(): string | undefined {
     const last = this.recentResults.slice(-3);
@@ -885,7 +907,9 @@ export class BotAgent {
         const t = bot.time.timeOfDay;
         const night = t >= 12_800 && t <= 23_000;
         const sky = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0;
-        return this.deps.config.bot.nightShelter && night && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
+        const wet = ['water', 'bubble_column'].includes(feet?.name ?? '') || ['water', 'bubble_column'].includes(head?.name ?? '');
+        // never start digging while in water: the drowning reflex can't run while this one does
+        return this.deps.config.bot.nightShelter && night && !wet && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
       })(),
       bunkeredAtDay: !!this.bunker && bot.time.timeOfDay < 12_000,
       preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),

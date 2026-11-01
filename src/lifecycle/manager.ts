@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { writeJsonFile } from '../util/fsjson.js';
 import type { Config } from '../config.js';
 import type { BedPos } from '../contracts.js';
 import { BotAgent, type AgentDeps } from '../bot/agent.js';
@@ -46,9 +48,23 @@ export class LifecycleManager {
     this.agents.clear();
   }
 
+  /** state/status.json: one line per living bot, refreshed every poll. Handy to see what everyone does. */
+  private writeStatus(): void {
+    try {
+      writeJsonFile(path.join(this.config.paths.state, 'status.json'), {
+        at: new Date().toISOString(),
+        bots: [...this.agents.values()].filter((a) => !a.isDead).map((a) => a.status()),
+        dead: this.state.bots.filter((r) => r.status !== 'alive').slice(-10).map((r) => ({ name: r.name, cause: r.deathCause ?? null })),
+      });
+    } catch {
+      /* best effort */
+    }
+  }
+
   private async tick(): Promise<void> {
     if (this.stopping || this.ticking) return;
     this.ticking = true;
+    this.writeStatus();
     try {
       const p = this.config.population;
       const alive = this.state.alive();

@@ -281,6 +281,16 @@ export const scenarios = {
     return ok(/moved/.test(r) && room.sealed, `${r.slice(0, 160)} | sealed=${room.sealed}`);
   },
 
+  async bunker_not_in_water(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`fill ${X - 2} ${Y} ${Z - 2} ${X + 2} ${Y} ${Z + 2} minecraft:water`);
+    await P.give('dirt', 4);
+    await P.sleep(1500);
+    const r = await digBunker(ctx);
+    const floorIntact = !(await isBlock(P, X, Y - 1, Z, 'minecraft:air')) && !(await isBlock(P, X, Y - 1, Z, 'minecraft:water'));
+    return ok(!r.feet && /water/.test(r.why) && floorIntact, `${r.why} | floor intact=${floorIntact}`);
+  },
+
   async ore_bonus(ctx, P) {
     await P.cmd(`fill ${P.X + 2} ${P.Y} ${P.Z - 1} ${P.X + 3} ${P.Y + 1} ${P.Z + 1} minecraft:stone`);
     await P.cmd(`setblock ${P.X + 4} ${P.Y} ${P.Z} minecraft:iron_ore`);

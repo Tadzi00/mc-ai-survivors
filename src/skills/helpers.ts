@@ -407,6 +407,8 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   const top = bot.entity.position.floored();
   const d1 = top.offset(0, -1, 0), d2 = top.offset(0, -2, 0), d3 = top.offset(0, -3, 0), floor = top.offset(0, -4, 0);
   const natural = (b: Block | null): boolean => !!b && b.boundingBox === 'block' && !MAN_MADE_RE.test(b.name) && bot.canDigBlock(b);
+  const wet = (p: Vec3): boolean => ['water', 'bubble_column', 'lava'].includes(bot.blockAt(p)?.name ?? '');
+  if (wet(top) || wet(top.offset(0, 1, 0))) return { why: 'standing in water: get out of the water first' };
   if (![d1, d2, d3].every((p) => natural(bot.blockAt(p)))) return { why: 'ground here is not diggable (built blocks, water or air below)' };
   if (!isSolid(bot.blockAt(floor))) return { why: 'no solid floor 4 blocks down (cave or water below)' };
   for (const p of [d1, d2, d3]) {
@@ -415,6 +417,9 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   }
   bot.pathfinder.stop();
   for (const p of [d1, d2, d3]) {
+    if (wet(bot.entity.position.floored()) || wet(bot.entity.position.floored().offset(0, 1, 0))) {
+      return { why: 'water flowed in while digging; stopped' };
+    }
     await bot.dig(bot.blockAt(p)!, true);
     await sleep(350); // fall a block
   }
