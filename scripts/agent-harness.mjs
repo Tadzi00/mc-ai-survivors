@@ -129,6 +129,28 @@ const scenarios = {
     return { ok: !!home && bedInside && !lowCounted, why: `home=${JSON.stringify(home)} bed inside=${bedInside} low room counted=${lowCounted}` };
   },
 
+  /** Falling water pours down the shaft the bot is in: it cannot swim up there, it must leave sideways. */
+  async waterfall() {
+    await cmd(`fill ${X - 2} ${Y - 4} ${Z - 2} ${X + 5} ${Y + 4} ${Z + 2} minecraft:stone`);
+    await cmd(`fill ${X} ${Y - 3} ${Z} ${X} ${Y + 3} ${Z} minecraft:air`); // the shaft
+    await cmd(`fill ${X + 1} ${Y - 3} ${Z} ${X + 3} ${Y - 2} ${Z} minecraft:water`); // side tunnel
+    await cmd(`fill ${X + 3} ${Y - 1} ${Z} ${X + 3} ${Y + 3} ${Z} minecraft:water`); // way up, still water
+    await cmd(`fill ${X + 3} ${Y + 4} ${Z} ${X + 3} ${Y + 4} ${Z} minecraft:air`);
+    await cmd(`setblock ${X} ${Y + 3} ${Z} minecraft:water`); // the source that pours down the shaft
+    const [a] = await startAgents([{ name: 'TestA_fall', x: X, z: Z }]);
+    await cmd(`tp TestA_fall ${X + 0.5} ${Y - 3} ${Z + 0.5}`);
+    await cmd(`effect clear TestA_fall`);
+    let out = false;
+    for (let i = 0; i < 50 && !a.isDead && !out; i++) {
+      await sleep(1000);
+      const p = await pos('TestA_fall');
+      out = !!p && p.y >= Y + 2 && Math.floor(p.x) === X + 3;
+    }
+    const alive = !a.isDead;
+    await stopAgents([a]);
+    return { ok: alive && out, why: `alive=${alive}, climbed out the side shaft=${out}` };
+  },
+
   /** A bot with only a WOODEN sword against a husk: does it hit at all? */
   async fight_wooden() {
     const [a] = await startAgents([{ name: 'TestA_wood', x: X, z: Z }]);

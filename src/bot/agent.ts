@@ -287,6 +287,9 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  private lastSurfaceY: number | undefined;
+  private lastSurfaceAt = 0;
+  private noRise = 0;
   private lastHurtAt = 0;
   private readonly lastGift = new Map<string, number>();
   private currentReflex: Reflex | undefined;
@@ -1284,23 +1287,36 @@ export class BotAgent {
     return false;
   }
 
-  /** Nearest air cell reachable through water/air (not through blocks), within `radius`. */
-  private nearestAir(radius: number): Vec3 | undefined {
+  /** Nearest air cell reachable through water/air (not through blocks), within `radius`; `sideways` skips our own column. */
+  private nearestAir(radius: number, sideways = false): Vec3 | undefined {
+    return this.pathToAir(radius, sideways)?.at(-1);
+  }
+
+  /** Route (cell by cell) through water to the nearest air cell, or undefined. */
+  private pathToAir(radius: number, sideways = false): Vec3[] | undefined {
     const bot = this.bot!;
     const start = bot.entity.position.floored().offset(0, 1, 0);
     const key = (v: Vec3): string => `${v.x},${v.y},${v.z}`;
-    const seen = new Set([key(start)]);
+    const parent = new Map<string, Vec3 | null>([[key(start), null]]);
     const queue: Vec3[] = [start];
     const dirs = [v3(0, 1, 0), v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(0, -1, 0)];
-    while (queue.length && seen.size < 3000) {
+    while (queue.length && parent.size < 3000) {
       const c = queue.shift()!;
       for (const d of dirs) {
         const n = c.plus(d);
-        if (seen.has(key(n)) || n.distanceTo(start) > radius) continue;
-        seen.add(key(n));
+        if (parent.has(key(n)) || n.distanceTo(start) > radius) continue;
+        parent.set(key(n), c);
         const b = bot.blockAt(n);
         if (!b) continue;
-        if (b.name === 'air' || b.name === 'cave_air') return n;
+        if ((b.name === 'air' || b.name === 'cave_air') && !(sideways && n.x === start.x && n.z === start.z)) {
+          const path: Vec3[] = [n];
+          let p = c;
+          while (p && key(p) !== key(start)) {
+            path.unshift(p);
+            p = parent.get(key(p)) ?? (null as unknown as Vec3);
+          }
+          return path;
+        }
         if (b.boundingBox !== 'block') queue.push(n); // water, kelp, seagrass...
       }
     }
@@ -1690,23 +1706,37 @@ export class BotAgent {
         bot.pathfinder.stop();
         // Straight up only works if the water above opens to air; under a ledge/ceiling the bot used to
         // "swim up" into the block for 18 s and drown. Then swim to the nearest air instead, or dig up.
-        if (r === 'surface' && !this.clearAbove()) {
-          const air = this.nearestAir(10);
-          if (air) {
-            // The pathfinder cannot plan underwater: swim there by hand (face it, forward + up, sprint-swim).
-            const end = Date.now() + 5_000;
+        // Not rising although the way up looks open (falling water pushes you down): get out sideways.
+        const yNow = bot.entity.position.y;
+        if (r === 'surface' && this.lastSurfaceY !== undefined && yNow <= this.lastSurfaceY + 0.3 && Date.now() - this.lastSurfaceAt < 8_000) this.noRise++;
+        else this.noRise = 0;
+        this.lastSurfaceY = yNow;
+        this.lastSurfaceAt = Date.now();
+        if (r === 'surface' && (!this.clearAbove() || this.noRise >= 2)) {
+          const route = this.pathToAir(12, this.noRise >= 2);
+          const air = route?.at(-1);
+          if (route && air) {
+            // The pathfinder cannot plan underwater: swim the route cell by cell (head cells of the path).
+            const end = Date.now() + 8_000;
             try {
-              while (Date.now() < end && !signal.aborted && !this.clearAbove()) {
-                await bot.lookAt(air.offset(0.5, 0.5, 0.5), true);
-                bot.setControlState('forward', true);
-                bot.setControlState('sprint', true);
-                bot.setControlState('jump', true);
-                await sleep(150);
+              for (const cell of route) {
+                while (Date.now() < end && !signal.aborted) {
+                  const head = bot.entity.position.offset(0, 1.6, 0);
+                  if (head.distanceTo(cell.offset(0.5, 0.5, 0.5)) < 0.7) break;
+                  await bot.lookAt(cell.offset(0.5, 0.5, 0.5), true);
+                  const up = cell.y + 0.5 > head.y + 0.2;
+                  bot.setControlState('forward', Math.hypot(cell.x + 0.5 - head.x, cell.z + 0.5 - head.z) > 0.3);
+                  bot.setControlState('jump', up);
+                  bot.setControlState('sneak', cell.y + 0.5 < head.y - 0.6); // swim down
+                  bot.setControlState('sprint', true);
+                  await sleep(100);
+                }
               }
             } finally {
               bot.clearControlStates();
             }
-            if (!this.clearAbove()) return `swimming towards air at ${fmtPos(air)}`;
+            if ((bot.blockAt(bot.entity.position.offset(0, 1.6, 0).floored())?.name ?? '') === 'water') return `swimming towards air at ${fmtPos(air)}`;
+            return `swam out to air at ${fmtPos(air)}`;
           }
           const above = bot.blockAt(bot.entity.position.floored().offset(0, 2, 0));
           if (above && above.boundingBox === 'block' && bot.canDigBlock(above) && above.digTime(null, false, true, false, [], []) < 1500) {
