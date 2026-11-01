@@ -26,7 +26,7 @@ import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
 import { Memory } from './memory.js';
-import { buildObservation, inventorySummary } from './observation.js';
+import { buildObservation, fitObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
 
@@ -1105,10 +1105,11 @@ export class BotAgent {
     });
     this.interruptedBy = undefined;
     this.planNote = undefined;
+    const obsText = fitObservation(obs, systemPrompt(this.tier, this.name, this.deps.config.chatRange, this.deps.config.shout).length);
     this.chat.takeUnread();
     const system = systemPrompt(this.tier, this.name, this.deps.config.chatRange, this.deps.config.shout);
     const ask = this.tier === 'smart' ? 'Make your plan (1-5 steps).' : 'Choose your next action.';
-    const messages: ChatMessage[] = [{ role: 'user', content: `${obs}\n\n${ask}` }];
+    const messages: ChatMessage[] = [{ role: 'user', content: `${obsText}\n\n${ask}` }];
     const started = Date.now();
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await provider.complete({ system, messages, maxTokens: tier.maxTokens, temperature: tier.temperature, model: tier.model });

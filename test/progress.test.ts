@@ -77,3 +77,17 @@ describe('season outlook', () => {
     expect(seasonOutlook('SUMMER', 9, 14)).toBe('Calendar: day 9/14 of SUMMER, AUTUMN in 6 day(s).');
   });
 });
+
+import { fitObservation } from '../src/bot/observation.js';
+
+describe('observation budget', () => {
+  it('leaves short observations alone and trims optional sections first', () => {
+    expect(fitObservation('You: x', 1000)).toBe('You: x');
+    const obs = ['You: Surv_01', 'PROGRESS: ...', 'Found earlier: ' + 'x'.repeat(4000), 'Lessons learned (share them!):', '  - ' + 'y'.repeat(4000)].join('\n');
+    const fit = fitObservation(obs, 7500);
+    expect(fit).toContain('You: Surv_01');
+    expect(fit).toContain('PROGRESS');
+    expect(fit).not.toContain('Found earlier');
+    expect(fit.length).toBeLessThanOrEqual(3500 * 3.6 - 7500);
+  });
+});

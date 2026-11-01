@@ -78,7 +78,7 @@ tiers:
   smart:
     provider: local
     model: qwen2.5:7b
-    maxTokens: 600   # room for a multi-step plan
+    maxTokens: 400   # a 5-step plan + say + learned is ~150 tokens; prompt + reply must fit the 4096 context
     temperature: 0.4
   basic:
     provider: local

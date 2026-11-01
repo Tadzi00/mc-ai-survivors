@@ -247,3 +247,21 @@ export function seasonOutlook(season: string, day: number, seasonDays: number): 
   if (season === 'WINTER') return `${base} Stay near heat; go out only by day, with leather armor if you have it.`;
   return base;
 }
+
+/**
+ * Keeps system + observation under ~3500 tokens (≈ 3.6 chars/token) so prompt + reply fit Ollama's default
+ * 4096 context; beyond it Ollama silently drops the START of the prompt (the rules). Optional sections are
+ * dropped first: older heard lines, discoveries, lessons, notes. (Exported for tests.)
+ */
+export function fitObservation(obs: string, systemChars: number, budgetTokens = 3500): string {
+  const budgetChars = budgetTokens * 3.6 - systemChars;
+  if (obs.length <= budgetChars) return obs;
+  let lines = obs.split('\n');
+  const dropOrder = [/^Found earlier:/, /^ {2}- /, /^Lessons learned/, /^Your notes:/, /^Storage you know:/, /^Heard recently:|^ {2}</];
+  for (const re of dropOrder) {
+    if (lines.join('\n').length <= budgetChars) break;
+    lines = lines.filter((l) => !re.test(l));
+  }
+  const out = lines.join('\n');
+  return out.length <= budgetChars ? out : out.slice(0, Math.max(500, budgetChars));
+}
