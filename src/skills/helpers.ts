@@ -394,3 +394,33 @@ export async function goSurface(ctx: SkillContext): Promise<string> {
     ? `reached open sky at ${fmtPos(bot.entity.position)}`
     : `still underground at ${fmtPos(bot.entity.position)} (sky light ${skyLightAt(bot)}); try go_surface again or mine upward`;
 }
+
+/**
+ * Emergency night bunker: dig two blocks straight down and seal the hole above the head with a block,
+ * so mobs can't reach. Returns the bunker feet position, or undefined (with a reason) if the ground is
+ * unsuitable (water/lava/built blocks/air below).
+ */
+export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: string }> {
+  const { bot } = ctx;
+  // Dig 3 down and seal the cell above the head: at that depth it is surrounded by ground blocks to place
+  // against (2 down leaves the opening at surface level with nothing to attach the cover to).
+  const top = bot.entity.position.floored();
+  const d1 = top.offset(0, -1, 0), d2 = top.offset(0, -2, 0), d3 = top.offset(0, -3, 0), floor = top.offset(0, -4, 0);
+  const natural = (b: Block | null): boolean => !!b && b.boundingBox === 'block' && !MAN_MADE_RE.test(b.name) && bot.canDigBlock(b);
+  if (![d1, d2, d3].every((p) => natural(bot.blockAt(p)))) return { why: 'ground here is not diggable (built blocks, water or air below)' };
+  if (!isSolid(bot.blockAt(floor))) return { why: 'no solid floor 4 blocks down (cave or water below)' };
+  for (const p of [d1, d2, d3]) {
+    const n = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].map((o) => bot.blockAt(p.plus(o))?.name ?? '');
+    if (n.some((x) => x === 'water' || x === 'lava')) return { why: 'water or lava next to the hole' };
+  }
+  bot.pathfinder.stop();
+  for (const p of [d1, d2, d3]) {
+    await bot.dig(bot.blockAt(p)!, true);
+    await sleep(350); // fall a block
+  }
+  await sleep(500);
+  const cover = findItem(bot, /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/);
+  if (!cover) return { feet: d3, why: 'dug in but have no block to seal the top' };
+  const ok = await placeItemAt(ctx, cover, d1);
+  return { feet: d3, why: ok ? 'dug in and sealed the top' : 'dug in but could not seal the top' };
+}

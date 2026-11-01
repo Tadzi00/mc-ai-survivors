@@ -290,6 +290,15 @@ one at a time on floor cells inside the room (flood fill from the bot; a plain r
 the walls) until the target is 12-28 °C. `build_shelter` runs it at the end; the warm_home reflex uses it;
 the progress step "warm shelter" is done only when the room is warm (or 4+ torches without readings).
 
+### 6.5.4 Nights (most deaths)
+
+Death tally after the first evening: 22 zombie, 5 stray, 3 skeleton, 2 spider, 2 creeper, 2 fall, 2 drowned,
+1 cold. So at night (time 12800-23000), a bot under open sky that isn't sleeping gets the `night_shelter`
+reflex: go home if it is within 48 blocks, else `digBunker`: dig 3 straight down (natural blocks only,
+solid floor below, no water/lava beside) and place a block in the cell above the head (at 2 deep that cell
+is at surface level with nothing to attach a block to). While bunkered at night the planner doesn't start
+new actions; in the morning `leave_bunker` runs go_surface. Fight/flee still come first.
+
 ### 6.6 Food
 
 - `eat` reflex when food <= 14 (or hurt and not full) and there is food.

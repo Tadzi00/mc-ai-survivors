@@ -8,6 +8,10 @@ export interface ReflexState {
   onFire: boolean;
   inWater: boolean;
   hostile?: { distance: number; type: string };
+  /** Night, under open sky, not bunkered: mobs will come. */
+  nightExposed?: boolean;
+  /** Day and the bot is still in its night bunker. */
+  bunkeredAtDay?: boolean;
   /** An animal to eat is visible within 48 blocks or remembered. */
   preyKnown?: boolean;
   /** A teammate's HELP shout heard recently (distance to the given coordinates). */
@@ -32,6 +36,8 @@ export type Reflex =
   | 'flee'
   | 'assist'
   | 'hunt'
+  | 'night_shelter'
+  | 'leave_bunker'
   | 'eat'
   | 'warm_torch'
   | 'warm_home'
@@ -58,6 +64,9 @@ export function chooseReflex(s: ReflexState): Reflex | null {
     if (s.homeKnown) return 'warm_home';
     if (s.hasTorch) return 'warm_torch';
   }
+  if (s.bunkeredAtDay) return 'leave_bunker';
   if (s.isNight && !s.isSleeping && s.bedKnown && !s.hostile) return 'sleep';
+  // Most deaths were zombies at night in the open: get home or dig in.
+  if (s.nightExposed && !s.isSleeping) return 'night_shelter';
   return null;
 }

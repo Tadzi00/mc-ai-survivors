@@ -35,6 +35,12 @@ describe('reflex choice', () => {
     expect(chooseReflex({ ...calm, hasFood: false, food: 12, preyKnown: true })).toBeNull();
     expect(chooseReflex({ ...calm, hasFood: true, food: 6, preyKnown: true })).toBe('eat');
   });
+  it('takes shelter at night in the open; leaves the bunker by day', () => {
+    expect(chooseReflex({ ...calm, isNight: true, nightExposed: true })).toBe('night_shelter');
+    expect(chooseReflex({ ...calm, isNight: true, nightExposed: true, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
+    expect(chooseReflex({ ...calm, bunkeredAtDay: true })).toBe('leave_bunker');
+    expect(chooseReflex({ ...calm, isNight: true, nightExposed: false })).toBeNull();
+  });
   it('runs to help a teammate when healthy, but own danger comes first', () => {
     expect(chooseReflex({ ...calm, helpCall: { distance: 60 } })).toBe('assist');
     expect(chooseReflex({ ...calm, helpCall: { distance: 60 }, health: 10 })).toBeNull();

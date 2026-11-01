@@ -23,16 +23,16 @@ const llm = { forTier: () => ({ provider: stub, tier: { model: 'stub', maxTokens
 
 async function platform() {
   await cmd(`forceload add ${X - R - 4} ${Z - R - 4} ${X + R + 4} ${Z + R + 4}`);
-  await cmd(`fill ${X - R} ${Y - 3} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
-  await cmd(`fill ${X - R} ${Y - 3} ${Z - R} ${X + R} ${Y - 3} ${Z + R} minecraft:bedrock`);
-  await cmd(`fill ${X - R} ${Y - 2} ${Z - R} ${X + R} ${Y - 1} ${Z + R} minecraft:stone`);
+  await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
+  await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y - 5} ${Z + R} minecraft:bedrock`);
+  await cmd(`fill ${X - R} ${Y - 4} ${Z - R} ${X + R} ${Y - 1} ${Z + R} minecraft:stone`);
   // light ceiling: no natural mob spawns on the test platform even at night
   await cmd(`fill ${X - R} ${Y + 7} ${Z - R} ${X + R} ${Y + 7} ${Z + R} minecraft:light[level=15]`);
   await cmd(`kill @e[type=!player,x=${X - R},y=${Y - 3},z=${Z - R},dx=${2 * R},dy=14,dz=${2 * R}]`);
 }
 async function cleanup() {
   await cmd(`kill @e[type=!player,x=${X - R},y=${Y - 3},z=${Z - R},dx=${2 * R},dy=14,dz=${2 * R}]`);
-  await cmd(`fill ${X - R} ${Y - 3} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
+  await cmd(`fill ${X - R} ${Y - 5} ${Z - R} ${X + R} ${Y + 8} ${Z + R} minecraft:air`);
   await cmd(`forceload remove ${X - R - 4} ${Z - R - 4} ${X + R + 4} ${Z + R + 4}`);
 }
 

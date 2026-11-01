@@ -11,7 +11,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, findBlocks, fmtPos, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, nearManMade, type Vec3 } from '../skills/helpers.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
@@ -127,6 +127,8 @@ export class BotAgent {
   private lastThought = '';
   /** A step to run next regardless of the plan queue (player command). */
   private forcedStep: PlannedAction | undefined;
+  /** Feet position of tonight's emergency bunker (cleared after leaving it in the morning). */
+  private bunker: Vec3 | undefined;
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
   /** A player's instruction that stays at the top of the observation for a while. */
@@ -851,6 +853,13 @@ export class BotAgent {
       inWater: feet?.name === 'water' || head?.name === 'water',
       hostile: hostile ? { distance: hostile.position.distanceTo(bot.entity.position), type: hostile.name ?? 'mob' } : undefined,
       nearbyHostiles: this.hostilesWithin(10).length,
+      nightExposed: (() => {
+        const t = bot.time.timeOfDay;
+        const night = t >= 12_800 && t <= 23_000;
+        const sky = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0;
+        return night && !this.bunker && sky >= 13 && !this.planQueue.some((p) => p.thought.startsWith('order from'));
+      })(),
+      bunkeredAtDay: !!this.bunker && bot.time.timeOfDay < 12_000,
       preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),
       helpCall:
         this.helpCall && Date.now() - this.helpCall.at < 90_000
@@ -887,7 +896,7 @@ export class BotAgent {
       this.skillAbort.abort();
     }
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : choice === 'assist' || choice === 'hunt' ? 90_000 : 25_000);
+    const timer = setTimeout(() => ac.abort(), choice === 'fight' ? 60_000 : ['assist', 'hunt', 'night_shelter', 'leave_bunker'].includes(choice) ? 90_000 : 25_000);
     const started = Date.now();
     let result = '';
     try {
@@ -994,6 +1003,28 @@ export class BotAgent {
         if (drop) await gotoNear(ctx, drop.position.x, drop.position.y, drop.position.z, 0, 6_000).catch(() => undefined);
         return `hunted ${target}: ${r}`;
       }
+      case 'night_shelter': {
+        const home = this.memory.place('home');
+        if (home && bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) < 48) {
+          bot.setControlState('sprint', true);
+          await gotoNear(ctx, home.x, home.y, home.z, 1, 40_000).catch(() => undefined);
+          bot.setControlState('sprint', false);
+          const sky = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0;
+          if (sky < 13) return 'night: went home';
+        }
+        const r = await digBunker(ctx);
+        if (r.feet) {
+          this.bunker = r.feet;
+          this.memory.learn('At night in the open, dig 2 down and seal the top: zombies cannot reach you');
+          this.jsonl.write('bunker', { pos: r.feet, result: r.why });
+        }
+        return `night: ${r.why}`;
+      }
+      case 'leave_bunker': {
+        const r = await goSurface(ctx);
+        this.bunker = undefined;
+        return `morning: ${r}`;
+      }
       case 'eat':
         return eatSkill(ctx);
       case 'warm_home': {
@@ -1015,7 +1046,8 @@ export class BotAgent {
   private async plannerLoop(): Promise<void> {
     const minInterval = this.deps.config.bot.plannerMinIntervalSeconds * 1000;
     while (this.running) {
-      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity) {
+      const inBunkerAtNight = !!this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000;
+      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || (inBunkerAtNight && !this.forcedStep)) {
         await sleep(250);
         continue;
       }

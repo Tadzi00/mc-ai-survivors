@@ -6,6 +6,7 @@ import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRo
 import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
+import { digBunker } from '../dist/skills/helpers.js';
 import { chestStoreSkill, chestTakeSkill } from '../dist/skills/impl/storage.js';
 
 const count = async (P, item) => Number(/Found (\d+)/.exec(await P.cmd(`clear ${P.botName} minecraft:${item} 0`))?.[1] ?? 0);
@@ -242,6 +243,20 @@ export const scenarios = {
     const r = await goSurfaceSkill(ctx);
     const after = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
     return ok(after >= 13, `${r} | sky light ${before} -> ${after}`);
+  },
+
+  async bunker(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.give('dirt', 4);
+    await P.give('stone_pickaxe', 1);
+    await P.sleep(1000);
+    const r = await digBunker(ctx);
+    await P.sleep(800);
+    const feetY = Math.floor(ctx.bot.entity.position.y);
+    const sealed = !(await isBlock(P, X, Y - 1, Z, 'minecraft:air'));
+    const out = await goSurfaceSkill(ctx);
+    const sky = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
+    return ok(feetY === Y - 3 && sealed && sky >= 13, `${r.why} | feet y=${feetY} (want ${Y - 3}) sealed=${sealed} | morning: ${out} sky=${sky}`);
   },
 
   async ore_bonus(ctx, P) {
