@@ -298,8 +298,13 @@ export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y:
   if (same(homeMe, homeTarget)) return;
   const home = homeMe ?? homeTarget!;
   const meIn = same(homeMe, home);
-  const doors = findBlocks(bot, Object.keys(bot.registry.blocksByName).filter((n) => n.endsWith('_door') && !n.includes('trap')), 7, 4)
-    .filter((b) => Math.abs(b.position.x - home.x) <= 4 && Math.abs(b.position.z - home.z) <= 4)
+  // Look for the door around the HOUSE, not around the bot: coming from far away the bot used to find no
+  // door, walk straight at the wall and try to get in over it.
+  const doorIds = new Set(Object.values(bot.registry.blocksByName).filter((b) => b.name.endsWith('_door') && !b.name.includes('trap')).map((b) => b.id));
+  const doors = bot
+    .findBlocks({ matching: (b) => doorIds.has(b.type), point: v3(home.x, home.y, home.z), maxDistance: 6, count: 8 })
+    .map((p) => bot.blockAt(p)!)
+    .filter((b) => !!b && Math.abs(b.position.x - home.x) <= 4 && Math.abs(b.position.z - home.z) <= 4)
     .map((b) => (bot.blockAt(b.position.offset(0, -1, 0))?.name.endsWith('_door') ? bot.blockAt(b.position.offset(0, -1, 0))! : b));
   const door = doors[0];
   if (!door) {
@@ -315,7 +320,8 @@ export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y:
   const outside = d.plus(out);
   const [from, to] = meIn ? [inside, outside.plus(out)] : [outside, inside];
   try {
-    await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(from.x, from.y, from.z)), 15_000, 'door');
+    const far = bot.entity.position.distanceTo(from);
+    await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(from.x, from.y, from.z)), Math.min(90_000, 15_000 + far * 600), 'door');
     // Toggle the door only if its panel is in the way (a sideways door is passable closed), walk straight
     // through by hand, then put it back the way it was.
     const axis = out.x !== 0 ? 'x' : 'z';

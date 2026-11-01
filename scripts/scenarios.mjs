@@ -133,6 +133,24 @@ export const scenarios = {
     return ok(outPos.z > P.Z + 4 && inside && holes === 0 && door, `out: ${out} (z=${outPos.z.toFixed(1)}) | back: ${back} | inside=${inside} holes=${holes} door=${door}`);
   },
 
+  // Coming home from the far side of the house (door on the other wall): walk round to the door, no digging.
+  async door_in_far(ctx, P) {
+    await room(P);
+    ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
+    await P.cmd(`tp ${P.botName} ${P.X + 0.5} ${P.Y} ${P.Z - 9.5}`);
+    await P.sleep(1500);
+    const r = await gotoSkill(ctx, { place: 'home' });
+    const pos = ctx.bot.entity.position;
+    const inside = Math.abs(pos.x - (P.X + 0.5)) < 2 && Math.abs(pos.z - (P.Z + 0.5)) < 2;
+    let holes = 0;
+    for (let x = P.X - 2; x <= P.X + 2; x++) for (let y = P.Y; y <= P.Y + 3; y++) for (let z = P.Z - 2; z <= P.Z + 2; z++) {
+      const wall = x === P.X - 2 || x === P.X + 2 || z === P.Z - 2 || z === P.Z + 2 || y === P.Y + 3;
+      if (!wall || (x === P.X && z === P.Z + 2 && y <= P.Y + 1)) continue;
+      if (await isBlock(P, x, y, z, 'minecraft:air')) holes++;
+    }
+    return ok(inside && holes === 0, `goto home: ${r} | at ${pos.x.toFixed(1)},${pos.z.toFixed(1)} | inside=${inside} holes=${holes}`);
+  },
+
   async door_in(ctx, P) {
     await room(P);
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
