@@ -12,7 +12,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, enableDoorPathing, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
@@ -171,6 +171,7 @@ export class BotAgent {
   /** Feet position of tonight's emergency bunker (cleared after leaving it in the morning). */
   private bunker: Vec3 | undefined;
   private readonly manMade = new ManMadeIndex();
+  private readonly lava = new LavaIndex();
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
   /** A player's instruction that stays at the top of the observation for a while. */
@@ -373,6 +374,13 @@ export class BotAgent {
         if (block.safe || cost >= 100) return cost;
         return cost + doorDigPenalty(block.position, this.manMade.doors);
       };
+      // Lava: no stepping on cells above lava, a heavy cost along lava edges.
+      moves.exclusionAreasStep.push((block: { position: Vec3 }) => this.lava.stepCost(block.position));
+      // Never dig next to water/lava or under sand/gravel. collectblock switches these OFF on every gather
+      // (and it shares our Movements), so they are locked on.
+      for (const k of ['dontCreateFlow', 'dontMineUnderFallingBlock']) {
+        Object.defineProperty(moves, k, { get: () => true, set: () => undefined, configurable: false });
+      }
       bot.pathfinder.setMovements(moves);
       // mineflayer-pvp and mineflayer-collectblock each make their OWN default Movements and switch the
       // pathfinder to them on every attack/gather: digging anywhere, scaffolding with dirt/cobblestone, no
@@ -385,7 +393,10 @@ export class BotAgent {
       this.timers.push(setInterval(() => this.villageTick(), 15_000));
       this.timers.push(setInterval(() => this.socialTick(), 4_000));
       this.timers.push(setInterval(() => {
-        if (this.bot?.entity) this.manMade.refresh(this.bot);
+        if (this.bot?.entity) {
+          this.manMade.refresh(this.bot);
+          this.lava.refresh(this.bot);
+        }
         this.refusedDigs.clear();
       }, 5_000));
       this.running = true;

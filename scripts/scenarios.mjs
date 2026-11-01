@@ -256,6 +256,17 @@ export const scenarios = {
     return ok(b.length === 2 && beside, `${r.slice(0, 140)} | buildings=${JSON.stringify(b.map((x) => [x.x0, x.z0, x.x1, x.z1]))}`);
   },
 
+  // A lava pool between the bot and its target: walk around it, never along its edge or over it.
+  async lava_avoid(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`fill ${X + 3} ${Y - 1} ${Z - 3} ${X + 5} ${Y - 1} ${Z + 3} minecraft:lava`);
+    await P.sleep(2500); // lava index refresh
+    const r = await gotoSkill(ctx, { x: X + 9, y: Y, z: Z });
+    const hp = ctx.bot.health;
+    const burning = !!ctx.bot.entity.onFire || /lava/.test(ctx.bot.blockAt(ctx.bot.entity.position)?.name ?? '');
+    return ok(/arrived/.test(r) && hp >= 19 && !burning, `${r} | health=${hp} burning=${burning}`);
+  },
+
   async door_in(ctx, P) {
     await room(P);
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });

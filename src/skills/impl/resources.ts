@@ -431,6 +431,16 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
   const raw = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/[\s,]*(x\s*)?\d+\s*$/, '').replace(/^\d+\s*x?\s*/, '').trim().replace(/\s+/g, '_');
   const item = bot.registry.itemsByName[woodAlias(bot, raw)];
   if (!item) return `unknown item "${a.item}"`;
+  // Tools: one is enough (a plan that kept restarting crafted 7 stone pickaxes). Same or better tier -> no.
+  const tool = /^(wooden|stone|iron|golden|diamond|netherite)_(pickaxe|axe|sword|shovel|hoe)$/.exec(item.name);
+  if (tool) {
+    const tiers = ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite'];
+    const have = bot.inventory.items().find((i) => {
+      const t = /^(wooden|stone|iron|golden|diamond|netherite)_(pickaxe|axe|sword|shovel|hoe)$/.exec(i.name);
+      return t && t[2] === tool[2] && tiers.indexOf(t[1]!) >= tiers.indexOf(tool[1]!);
+    });
+    if (have) return `you already have a ${have.name}; no need for another ${item.name} (tools are used automatically)`;
+  }
   if (item.name === 'crafting_table') {
     const have = countItem(bot, 'crafting_table');
     if (have > 0) return `you already have ${have} crafting_table in your inventory; craft tools directly (a table is placed automatically)`;

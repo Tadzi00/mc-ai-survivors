@@ -125,3 +125,10 @@ describe('item name cleanup', () => {
     expect(g.ok && g.steps[0]!.args).toMatchObject({ block: 'oak_log', count: 4 });
   });
 });
+
+describe('comma counts', () => {
+  it('cleans "iron_ore,32"', () => {
+    const r = pp('{"thought":"t","skill":"gather","args":{"block":"iron_ore,32"}}', 'smart');
+    expect(r.ok && r.steps[0]!.args).toMatchObject({ block: 'iron_ore', count: 32 });
+  });
+});

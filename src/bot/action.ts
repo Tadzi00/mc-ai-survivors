@@ -44,7 +44,7 @@ export function parseAction(text: string, tier: Tier): ParseResult {
     for (const k of ['item', 'block', 'target']) {
       const v = args[k];
       if (typeof v !== 'string') continue;
-      const m = /^(?:minecraft:)?([a-z0-9_ ]+?)\s*(?:[:x*]\s*(\d+))?$/i.exec(v.trim());
+      const m = /^(?:minecraft:)?([a-z0-9_ ]+?)\s*(?:[:x*,]\s*(\d+))?$/i.exec(v.trim());
       if (!m) continue;
       args[k] = m[1]!.trim().toLowerCase().replace(/\s+/g, '_');
       if (m[2] && args.count === undefined && k !== 'target') args.count = Number(m[2]);

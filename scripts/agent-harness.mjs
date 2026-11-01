@@ -286,6 +286,7 @@ const scenarios = {
       { name: 'TestB_lib', x: X + 3, z: Z + 3 },
     ]);
     a.deps.village.found({ x: X, y: Y, z: Z }, 'TestA_lib');
+    a.lastMeeting.set('TestB_lib', Date.now()); // no talking: B must learn from the book
     for (const l of ['gather iron_ore: need a stone pickaxe', 'Taught by TAdzi00: diamonds are below y 16', 'craft torch: need coal']) a.memory.learn(l);
     a.memory.discover('iron_ore', { x: X + 50, y: Y - 30, z: Z });
     await cmd('give TestA_lib minecraft:writable_book 1');

@@ -12,7 +12,7 @@ import { loadConfig } from '../dist/config.js';
 import { RconClient } from '../dist/rcon/rcon.js';
 import { SeasonsApi } from '../dist/rcon/server.js';
 import { Memory } from '../dist/bot/memory.js';
-import { MAN_MADE_RE, ManMadeIndex, enableDoorPathing } from '../dist/skills/helpers.js';
+import { MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing } from '../dist/skills/helpers.js';
 import { doorDigPenalty } from '../dist/bot/doors.js';
 import { enableServerCrafting } from '../dist/skills/impl/resources.js';
 import { scenarios } from './scenarios.mjs';
@@ -81,6 +81,14 @@ function spawnBot(name) {
         const cost = safeOrBreak(block, toBreak);
         return block.safe || cost >= 100 ? cost : cost + doorDigPenalty(block.position, index.doors);
       };
+      // same lava rules as the agent
+      const lava = new LavaIndex();
+      lava.refresh(bot);
+      bot.__lavaTimer = setInterval(() => { if (bot.entity) lava.refresh(bot); }, 2000);
+      bot.once('end', () => clearInterval(bot.__lavaTimer));
+      mv.exclusionAreasStep.push((block) => lava.stepCost(block.position));
+      for (const k of ['dontCreateFlow', 'dontMineUnderFallingBlock']) Object.defineProperty(mv, k, { get: () => true, set: () => undefined });
+      bot.__lava = lava;
       bot.pathfinder.setMovements(mv);
       bot.pvp.movements = mv;
       bot.collectBlock.movements = mv;

@@ -559,6 +559,12 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   rules); later gotos kept using them. The agent sets `bot.pvp.movements` and `bot.collectBlock.movements` to
   its own. Below everything, `bot.dig` refuses home/protected/built-area blocks outside build skills
   (`HOME_BUILD_SKILLS`) and logs the caller (`dig_refused`).
+- **Lava**: `LavaIndex` (refreshed every 5 s) adds a pathfinder step cost: lava under/in the cell = forbidden
+  (100), lava next to it = 30. `dontCreateFlow` / `dontMineUnderFallingBlock` are locked on with
+  defineProperty: collectblock sets them false on every gather and shares our Movements.
+- **Ores**: any `X_ore` query also matches `deepslate_X_ore` (below y=0 nearly all ore is deepslate);
+  "iron"/"diamond"/... aliases too. `gather` crafts the pickaxe it needs when it can.
+- **Tools**: `craft` refuses a tool when the bot already has the same kind at the same or a better tier.
 - **Doors in pathfinding** (`enableDoorPathing`, `bot/doors.ts`): mineflayer-pathfinder's `canOpenDoors`
   only knows fence gates, and its gate path stalls forever (the `placing` flag is never cleared after
   `useOne`). So doors were solid unbreakable blocks, no route went through a door, and bots dug a hole next

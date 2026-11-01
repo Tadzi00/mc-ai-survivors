@@ -48,6 +48,13 @@ export function resolveBlockNames(bot: Bot, query: string): string[] {
     ore: (n) => n.endsWith('_ore'),
     coal: (n) => n === 'coal_ore' || n === 'deepslate_coal_ore',
     iron: (n) => n === 'iron_ore' || n === 'deepslate_iron_ore',
+    gold: (n) => n === 'gold_ore' || n === 'deepslate_gold_ore',
+    copper: (n) => n === 'copper_ore' || n === 'deepslate_copper_ore',
+    diamond: (n) => n === 'diamond_ore' || n === 'deepslate_diamond_ore',
+    diamonds: (n) => n === 'diamond_ore' || n === 'deepslate_diamond_ore',
+    redstone: (n) => n === 'redstone_ore' || n === 'deepslate_redstone_ore',
+    lapis: (n) => n === 'lapis_ore' || n === 'deepslate_lapis_ore',
+    emerald: (n) => n === 'emerald_ore' || n === 'deepslate_emerald_ore',
     sand: (n) => n === 'sand',
     dirt: (n) => n === 'dirt' || n === 'grass_block',
     wool: (n) => n.endsWith('_wool'),
@@ -55,6 +62,10 @@ export function resolveBlockNames(bot: Bot, query: string): string[] {
   };
   const f = alias[q];
   if (f) return all.filter(f);
+  // "iron_ore" also means deepslate_iron_ore (and the other way round): below y=0 nearly all ore is
+  // the deepslate kind, and "gather iron_ore" walked right past it.
+  const ore = /^(?:deepslate_)?([a-z]+_ore)$/.exec(q);
+  if (ore) return [ore[1]!, `deepslate_${ore[1]}`].filter((n) => bot.registry.blocksByName[n]);
   if (bot.registry.blocksByName[q]) return [q];
   return all.filter((n) => n.includes(q));
 }
@@ -607,3 +618,34 @@ export function isEmptyCell(b: Block | null | undefined): boolean {
 /** Blocks a skill may dig once even inside a home (e.g. taking back its own crafting table). */
 export const ALLOWED_DIGS = new Set<string>();
 export const digKey = (p: { x: number; y: number; z: number }): string => `${p.x},${p.y},${p.z}`;
+
+/**
+ * Lava near the bot (refreshed every few seconds; set lookups so the pathfinder stays fast). Used to keep
+ * paths off lava edges: a cell with lava right below is forbidden, a cell next to lava costs a lot.
+ */
+export class LavaIndex {
+  private cells = new Set<string>();
+
+  refresh(bot: Bot, radius = 40): void {
+    const id = bot.registry.blocksByName.lava?.id;
+    if (id === undefined) return;
+    const found = bot.findBlocks({ matching: id, maxDistance: radius, count: 3000 });
+    this.cells = new Set(found.map((p) => `${p.x},${p.y},${p.z}`));
+  }
+
+  /** Pathfinder step cost for standing in cell p (feet). */
+  stepCost(p: { x: number; y: number; z: number }): number {
+    if (this.cells.size === 0) return 0;
+    const has = (x: number, y: number, z: number): boolean => this.cells.has(`${x},${y},${z}`);
+    const { x, y, z } = p;
+    if (has(x, y - 1, z) || has(x, y, z)) return 100; // lava underfoot or in the cell: never
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      if (has(x + dx, y, z + dz) || has(x + dx, y - 1, z + dz)) return 30; // an edge: one slip and you burn
+    }
+    return 0;
+  }
+
+  get size(): number {
+    return this.cells.size;
+  }
+}
