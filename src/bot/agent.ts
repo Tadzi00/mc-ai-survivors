@@ -11,7 +11,8 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, enableDoorPathing, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
 import { heatRoomSkill, placeTorchSkill } from '../skills/impl/building.js';
@@ -226,8 +227,8 @@ export class BotAgent {
       moves.scafoldingBlocks = [];
       moves.allow1by1towers = false;
       if (this.deps.rcon && this.deps.config.bot.serverCrafting) enableServerCrafting(bot, this.name, this.deps.rcon);
-      // Use doors instead of digging through walls (Paper handles door opening fine).
-      moves.canOpenDoors = true;
+      // Walk through doors (open, pass, close behind) instead of digging round them.
+      enableDoorPathing(bot, moves);
       // Built blocks (glass, panes, planks, doors, beds, ...) are never broken while pathfinding, so a closed
       // house can only be entered through its door. (The exclusion cost below covers blocks NEXT to them.)
       for (const b of Object.values(bot.registry.blocksByName)) {
@@ -247,6 +248,16 @@ export class BotAgent {
         }
         return 0;
       });
+      // Prefer doors: digging near a known door costs extra, so the pathfinder walks round to the door
+      // unless that detour is much longer (see bot/doors.ts). The pathfinder only uses the break-exclusion
+      // hook as an allowed/forbidden switch, so the penalty is added to its dig cost instead.
+      const m = moves as unknown as { safeOrBreak: (block: { safe?: boolean; position: Vec3 }, toBreak: Vec3[]) => number };
+      const safeOrBreak = m.safeOrBreak.bind(moves);
+      m.safeOrBreak = (block, toBreak) => {
+        const cost = safeOrBreak(block, toBreak);
+        if (block.safe || cost >= 100) return cost;
+        return cost + doorDigPenalty(block.position, this.manMade.doors);
+      };
       bot.pathfinder.setMovements(moves);
       bot.pathfinder.thinkTimeout = 10_000; // default 5 s gave up too early in dense terrain
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = 40; // impossible targets fail fast (not in the typings)

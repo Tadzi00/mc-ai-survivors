@@ -127,6 +127,34 @@ export const scenarios = {
     return ok(inside && doorStill, `goto home: ${r} | at ${pos.x.toFixed(1)},${pos.z.toFixed(1)} | door=${doorStill}`);
   },
 
+  // A dirt wall (natural, cheap to dig) across the whole platform with a door 7 blocks to the side.
+  // Straight through the wall is shorter, but the bot should walk round through the door, leaving no hole.
+  async door_detour(ctx, P) {
+    const { X, Y, Z } = P;
+    const wx = X + 3;
+    await P.cmd(`fill ${wx} ${Y} ${Z - 12} ${wx} ${Y + 2} ${Z + 12} minecraft:dirt`);
+    await P.cmd(`setblock ${wx} ${Y} ${Z + 7} minecraft:oak_door[half=lower,facing=east]`);
+    await P.cmd(`setblock ${wx} ${Y + 1} ${Z + 7} minecraft:oak_door[half=upper,facing=east]`);
+    await P.sleep(6000); // man-made index refresh (RCON blocks fire no events)
+    ctx.log('doors known: ' + JSON.stringify(ctx.bot.__doorIndex?.doors));
+    if (process.env.NODIG) ctx.bot.pathfinder.movements.canDig = false;
+    const dbg = process.env.DEBUG_DOORS ? setInterval(() => {
+      const d = ctx.bot.blockAt(new ctx.bot.entity.position.constructor(wx, Y, Z + 7));
+      ctx.log(`pos ${ctx.bot.entity.position.toString()} door ${JSON.stringify(d?.getProperties())} moving=${ctx.bot.pathfinder.isMoving()}`);
+    }, 2000) : null;
+    const r = await gotoSkill(ctx, { x: X + 6, y: Y, z: Z }).catch((e) => 'ERR ' + e.message);
+    if (dbg) clearInterval(dbg);
+    const pos = ctx.bot.entity.position;
+    let holes = 0;
+    for (let z = Z - 12; z <= Z + 12; z++) for (let y = Y; y <= Y + 2; y++) {
+      if (z === Z + 7 && y <= Y + 1) continue;
+      if (!(await isBlock(P, wx, y, z, 'minecraft:dirt'))) holes++;
+    }
+    await P.sleep(1500);
+    const closed = await isBlock(P, wx, Y, Z + 7, 'minecraft:oak_door[open=false]');
+    return ok(pos.x > wx + 1 && holes === 0 && closed, `goto: ${r} | at x=${pos.x.toFixed(1)} z=${pos.z.toFixed(1)} | holes=${holes} door closed=${closed}`);
+  },
+
   async add_door(ctx, P) {
     await room(P, { door: false });
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });

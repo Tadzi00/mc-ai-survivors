@@ -12,7 +12,8 @@ import { loadConfig } from '../dist/config.js';
 import { RconClient } from '../dist/rcon/rcon.js';
 import { SeasonsApi } from '../dist/rcon/server.js';
 import { Memory } from '../dist/bot/memory.js';
-import { MAN_MADE_RE } from '../dist/skills/helpers.js';
+import { MAN_MADE_RE, ManMadeIndex, enableDoorPathing } from '../dist/skills/helpers.js';
+import { doorDigPenalty } from '../dist/bot/doors.js';
 import { enableServerCrafting } from '../dist/skills/impl/resources.js';
 import { scenarios } from './scenarios.mjs';
 import { rmSync } from 'node:fs';
@@ -53,7 +54,7 @@ function spawnBot(name) {
       const mv = new pf.Movements(bot);
       mv.canDig = true;
       mv.allowParkour = false;
-      mv.canOpenDoors = true;
+      enableDoorPathing(bot, mv);
       mv.scafoldingBlocks = [];
       mv.allow1by1towers = false;
       for (const b of Object.values(bot.registry.blocksByName)) if (MAN_MADE_RE.test(b.name)) mv.blocksCantBreak.add(b.id);
@@ -68,6 +69,17 @@ function spawnBot(name) {
         const home = bot.__memory?.place('home');
         return home && Math.abs(p.x - home.x) <= 4 && Math.abs(p.z - home.z) <= 4 && p.y >= home.y - 1 && p.y <= home.y + 4 ? 1000 : 0;
       });
+      // same door preference as the agent
+      const index = new ManMadeIndex();
+      bot.__doorIndex = index;
+      index.refresh(bot);
+      bot.__doorTimer = setInterval(() => { if (bot.entity) index.refresh(bot); }, 5000);
+      bot.once('end', () => clearInterval(bot.__doorTimer));
+      const safeOrBreak = mv.safeOrBreak.bind(mv);
+      mv.safeOrBreak = (block, toBreak) => {
+        const cost = safeOrBreak(block, toBreak);
+        return block.safe || cost >= 100 ? cost : cost + doorDigPenalty(block.position, index.doors);
+      };
       bot.pathfinder.setMovements(mv);
       bot.pathfinder.thinkTimeout = 10_000;
       bot.pathfinder.searchRadius = 40;

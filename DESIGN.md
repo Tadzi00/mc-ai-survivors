@@ -267,7 +267,7 @@ Notes are capped (`notesMax`); compaction is **deterministic** (oldest half merg
 - Bot side (so they don't waste time): `gather log` only takes logs that look like trees (leaves within a
   few blocks, nothing man-made within 2); other gathers skip blocks touching man-made blocks; nothing inside
   protected areas (refreshed from `SB|v1|areas` every 60 s). Man-made block types are in the pathfinder's `blocksCantBreak` (a closed house is
-  entered through its door; `canOpenDoors` is on), blocks touching them or inside protected areas get a huge
+  entered through its door, see "Doors in pathfinding"), blocks touching them or inside protected areas get a huge
   dig cost, and the unstuck routine never digs them. An open window hole is still a valid path.
 - A bot sets its own home with `set_home {}` (where it stands; reports sealed/leaky/warm via `room raw`), and
   automatically when it claims, places or sleeps in a bed while it has no home yet (the bed spot).
@@ -423,7 +423,7 @@ are not logged (size); the hash lets you spot repeated identical situations.
 (`scripts/scenarios.mjs`) with a real mineflayer bot on a temporary 3-layer platform at x≈3000, y=200, checks
 the result through RCON (server truth) and removes everything afterwards. The bot gets the same plugins and
 movement rules as a real agent. Scenarios: signs, books, chest, smelt, craft_tools, bed_claim, door_out,
-door_in, add_door, torch, hunt, eat, sapling, farm, ore_bonus. Run it after touching skills.
+door_in, door_detour, add_door, torch, hunt, eat, sapling, farm, ore_bonus. Run it after touching skills.
 Findings it produced: beds could not be placed in a 3x3 room (now: any free foot/head pair, stand behind,
 face forward); door transit used the pathfinder through the open door, which toggled it shut (now: walk
 straight); smelt counted window results (now: inventory change, leftovers reported); goto said "arrived"
@@ -508,5 +508,14 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   most of its time walking behind its teammate.
 - Pathfinder scaffolding is off (`scafoldingBlocks = []`, no 1x1 towers): it placed blocks to climb/bridge
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
-- Bots open doors (`canOpenDoors`) and never dig blocks within 4 blocks of their home (pathfinder
-  `exclusionAreasBreak`), so they don't tunnel out of their own shelter.
+- Bots never dig blocks within 4 blocks of their home (pathfinder `exclusionAreasBreak`), so they don't
+  tunnel out of their own shelter.
+- **Doors in pathfinding** (`enableDoorPathing`, `bot/doors.ts`): mineflayer-pathfinder's `canOpenDoors`
+  only knows fence gates, and its gate path stalls forever (the `placing` flag is never cleared after
+  `useOne`). So doors were solid unbreakable blocks, no route went through a door, and bots dug a hole next
+  to it. Now `canOpenDoors` is OFF on purpose; wooden doors (both halves, open or closed) are passable in
+  `getBlock`, a 150 ms timer opens a closed door on the next path nodes and closes doors the bot opened once
+  it is 2+ blocks past (heat). Iron doors stay solid. Digging within 10 blocks (±4 y) of a known door costs
+  +`DOOR_DIG_PENALTY` (12) per block on top of the normal dig cost (wrapped `safeOrBreak`, because the
+  pathfinder only uses `exclusionAreasBreak` as an allowed/forbidden switch), so a route through a door
+  wins unless the detour is ~12 blocks longer per block that would be dug. Scenario `door_detour`.

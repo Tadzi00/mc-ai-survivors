@@ -158,3 +158,16 @@ describe('lesson dedup by meaning', () => {
     expect(lessonSimilarity('iron ore needs a stone pickaxe', 'cows live on grass')).toBe(0);
   });
 });
+
+import { doorDigPenalty, DOOR_DIG_PENALTY } from '../src/bot/doors.js';
+describe('doorDigPenalty', () => {
+  const doors = [{ x: 10, y: 64, z: 10 }];
+  it('penalises digging near a door', () => {
+    expect(doorDigPenalty({ x: 13, y: 65, z: 4 }, doors)).toBe(DOOR_DIG_PENALTY);
+  });
+  it('is free far from doors or with none known', () => {
+    expect(doorDigPenalty({ x: 30, y: 64, z: 10 }, doors)).toBe(0);
+    expect(doorDigPenalty({ x: 10, y: 50, z: 10 }, doors)).toBe(0);
+    expect(doorDigPenalty({ x: 10, y: 64, z: 10 }, [])).toBe(0);
+  });
+});

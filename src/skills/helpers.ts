@@ -444,7 +444,13 @@ export class ManMadeIndex {
     const ids = this.ids;
     const found = bot.findBlocks({ matching: (b) => ids.has(b.type), maxDistance: radius, count: 4000 });
     this.cells = new Set(found.map((p) => `${p.x},${p.y},${p.z}`));
+    this.doors = found
+      .filter((p) => /_door$/.test(bot.blockAt(p)?.name ?? ''))
+      .map((p) => ({ x: p.x, y: p.y, z: p.z }));
   }
+
+  /** Door blocks (iron and wooden) seen at the last refresh. */
+  doors: { x: number; y: number; z: number }[] = [];
 
   /** True if `p` or one of its 6 neighbours is a known man-made block. */
   touches(p: { x: number; y: number; z: number }): boolean {
@@ -460,4 +466,78 @@ export class ManMadeIndex {
       this.cells.has(`${x},${y},${z - 1}`)
     );
   }
+}
+
+/**
+ * Teach the pathfinder to use wooden doors. Its `canOpenDoors` only covers fence gates, and even that path
+ * stalls (it never clears its "placing" flag after using the gate). So a door was a solid block it may not
+ * break, routes through doors did not exist and the bot dug a hole beside the door instead.
+ * Here wooden doors count as passable when planning, and the bot opens a closed door on its path when it
+ * gets there, then closes it again once it is a few blocks past (heat leaks). Iron doors stay solid.
+ */
+export function enableDoorPathing(bot: Bot, moves: unknown): void {
+  const doorIds = new Set(
+    Object.values(bot.registry.blocksByName).filter((b) => /_door$/.test(b.name) && b.name !== 'iron_door').map((b) => b.id),
+  );
+  const isOpen = (b: Block | null | undefined): boolean => {
+    const o = (b?.getProperties() as Record<string, unknown> | undefined)?.open;
+    return o === true || o === 'true';
+  };
+  type PBlock = { type?: number; safe?: boolean; physical?: boolean; openable?: boolean };
+  const m = moves as { getBlock: (pos: unknown, dx: number, dy: number, dz: number) => PBlock; canOpenDoors: boolean };
+  m.canOpenDoors = false; // the built-in gate opening stalls the path; doors are opened below instead
+  const getBlock = m.getBlock.bind(moves);
+  m.getBlock = (pos, dx, dy, dz) => {
+    const b = getBlock(pos, dx, dy, dz);
+    if (b?.type !== undefined && doorIds.has(b.type)) {
+      b.safe = true; // walk through (opened on arrival)
+      b.physical = false; // never stand on a door
+      b.openable = false;
+    }
+    return b;
+  };
+
+  let path: { x: number; y: number; z: number }[] = [];
+  bot.on('path_update', (r: { path: { x: number; y: number; z: number }[] }) => { path = r.path ?? []; });
+  bot.on('goal_reached', () => { path = []; });
+  bot.on('path_reset', () => { path = []; });
+
+  const opened = new Map<string, Vec3>(); // lower halves we opened
+  let busy = false;
+  const timer = setInterval(() => {
+    if (!bot.entity || busy) return;
+    const me = bot.entity.position;
+    // open a closed door on the path just ahead
+    if (path.length > 0 && bot.pathfinder.isMoving()) {
+      for (const n of path.slice(0, 4)) {
+        if (me.distanceTo(new vec3.Vec3(n.x + 0.5, n.y, n.z + 0.5)) > 2.6) continue;
+        for (const dy of [0, 1]) {
+          const b = bot.blockAt(new vec3.Vec3(n.x, n.y + dy, n.z));
+          if (!b || !doorIds.has(b.type)) continue;
+          const lower = dy === 1 || (b.getProperties() as Record<string, unknown>).half === 'upper' ? b.position.offset(0, -1, 0) : b.position;
+          if (isOpen(b)) break;
+          busy = true;
+          bot.activateBlock(b).then(
+            () => { opened.set(`${lower.x},${lower.y},${lower.z}`, lower); },
+            () => undefined,
+          ).finally(() => { setTimeout(() => { busy = false; }, 300); });
+          return;
+        }
+      }
+    }
+    // close doors we opened once we are past them
+    for (const [key, pos] of opened) {
+      const d = me.distanceTo(pos.offset(0.5, 0, 0.5));
+      if (d > 8) { opened.delete(key); continue; }
+      if (d < 2.2 || path.slice(0, 3).some((n) => n.x === pos.x && n.z === pos.z)) continue;
+      opened.delete(key);
+      const door = bot.blockAt(pos);
+      if (door && doorIds.has(door.type) && isOpen(door)) {
+        busy = true;
+        bot.activateBlock(door).catch(() => undefined).finally(() => { busy = false; });
+        return;
+      }
+    }
+  }, 150);
+  bot.once('end', () => clearInterval(timer));
 }
