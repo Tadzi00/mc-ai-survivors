@@ -36,6 +36,7 @@ describe('reflex choice', () => {
   });
   it('hunts when starving with no food, if prey is known', () => {
     expect(chooseReflex({ ...calm, hasFood: false, food: 6, preyKnown: true })).toBe('hunt');
+    expect(chooseReflex({ ...calm, hasFood: false, food: 6, preyKnown: true, isNight: true })).not.toBe('hunt');
     expect(chooseReflex({ ...calm, hasFood: false, food: 6, preyKnown: false })).toBeNull();
     expect(chooseReflex({ ...calm, hasFood: false, food: 12, preyKnown: true })).toBeNull();
     expect(chooseReflex({ ...calm, hasFood: true, food: 6, preyKnown: true })).toBe('eat');

@@ -63,7 +63,8 @@ export function chooseReflex(s: ReflexState): Reflex | null {
   if (s.helpCall && s.helpCall.distance > 4 && s.helpCall.distance <= 150 && s.health >= 12) return 'assist';
   if (s.hasFood && (s.food <= 14 || (s.health < 12 && s.food < 20))) return 'eat';
   // Starving with nothing to eat: go get food NOW (the model kept gathering wood until it starved).
-  if (!s.hasFood && s.food <= 6 && s.preyKnown) return 'hunt';
+  // Never hunt at night: monsters are out, and hunger alone cannot kill (Normal stops at half a heart).
+  if (!s.hasFood && s.food <= 6 && s.preyKnown && !s.isNight) return 'hunt';
   // Keep a reserve: in daylight with an animal in sight, stock up before hunger becomes an emergency.
   if (s.foodItems !== undefined && s.foodItems < 3 && s.food <= 18 && s.preyNear && !s.isNight && !s.hostile) return 'hunt';
   if (s.cold === true) {
