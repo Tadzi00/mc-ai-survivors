@@ -25,8 +25,9 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Tool tiers: wood < stone < iron < diamond. Better ores need better pickaxes; wood can mine stone and coal.
 - Raw ores (raw_iron, raw_copper, raw_gold) are useless until SMELTED in a furnace (8 cobblestone) with fuel
   (coal, charcoal, logs, planks). Tools are made from the ingots.
-- Torch = coal or charcoal + stick. Charcoal = smelt a log. A small sealed room needs about 4 torches to be
-  warm; a campfire or lit furnace makes a small room too hot.
+- Torch = coal or charcoal + stick. Charcoal = smelt a log. One torch often keeps a small sealed room warm
+  (more in deep winter). A room warms up SLOWLY: after heat_room, wait instead of adding torches. A campfire
+  or lit furnace makes a small room too hot.
 - Food: kill animals; cooked meat (smelt it) feeds much more than raw. Food heals you when you are full.
 - Night: monsters spawn in darkness. Zombies and skeletons burn in sunlight; creepers explode; spiders climb.
 - Falling more than ~4 blocks hurts; lava kills; you can drown.

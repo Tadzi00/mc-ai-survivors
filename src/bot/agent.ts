@@ -174,12 +174,15 @@ export class BotAgent {
   /** Set while a skill that builds or repairs on purpose runs (it may dig at home). */
   private allowHomeDig = false;
 
-  /** Blocks the bot must never dig by accident: protected areas, built blocks and their neighbours, homes. */
-  private digForbidden(p: Vec3): boolean {
-    if (this.deps.protectedAreas?.contains(p)) return true;
-    if (this.manMade.touches(p)) return true;
+  private readonly refusedDigs = new Map<string, number>();
+
+  /** Why the bot must never dig here by accident (protected area, built block nearby, a home), or false. */
+  private digForbidden(p: Vec3): string | false {
+    if (this.deps.protectedAreas?.contains(p)) return 'protected area';
+    if (this.manMade.touches(p)) return 'next to a built block';
     const homes = [this.memory.place('home'), ...(this.deps.homes?.all() ?? [])];
-    return homes.some((h) => !!h && Math.abs(p.x - h.x) <= 4 && Math.abs(p.z - h.z) <= 4 && p.y >= h.y - 1 && p.y <= h.y + 4);
+    const h = homes.find((h) => !!h && Math.abs(p.x - h.x) <= 4 && Math.abs(p.z - h.z) <= 4 && p.y >= h.y - 1 && p.y <= h.y + 4);
+    return h ? `home at ${h.x},${h.y},${h.z}` : false;
   }
   private lastWhisperAt = 0;
   /** Stuck-while-walking detection (see unstickTick). */
@@ -260,11 +263,20 @@ export class BotAgent {
       // with where it came from.
       const dig = bot.dig.bind(bot);
       bot.dig = (async (block: Block, ...rest: unknown[]) => {
-        if (block && !this.allowHomeDig && this.digForbidden(block.position)) {
-          const from = (new Error().stack ?? '').split('\n').slice(2, 6).map((l) => l.trim().replace(/^at /, '')).join(' < ');
-          this.log('warn', `refused to dig ${block.name} at ${fmtPos(block.position)} (home/built area) during ${this.currentSkill ?? 'reflex'}: ${from}`);
-          this.jsonl.write('dig_refused', { block: block.name, pos: block.position, skill: this.currentSkill, from });
-          throw new Error(`refused to dig ${block.name}: part of a home or building (use the door)`);
+        const why = block && !this.allowHomeDig ? this.digForbidden(block.position) : false;
+        if (why) {
+          const key = `${block.position.x},${block.position.y},${block.position.z}`;
+          const n = (this.refusedDigs.get(key) ?? 0) + 1;
+          this.refusedDigs.set(key, n);
+          if (n === 1) {
+            const from = (new Error().stack ?? '').split('\n').slice(2, 5).map((l) => l.trim().replace(/^at /, '').replace(/\(.*node_modules\//, '(')).join(' < ');
+            const planCheck = (moves as unknown as { exclusionBreak(b: unknown): number }).exclusionBreak(block);
+            this.log('warn', `refused to dig ${block.name} at ${fmtPos(block.position)} (${why}) during ${this.currentSkill ?? 'reflex'}; path check said ${planCheck}: ${from}`);
+            this.jsonl.write('dig_refused', { block: block.name, pos: block.position, why, planCheck, skill: this.currentSkill, from });
+          }
+          // The pathfinder re-plans the same dig over and over: give up on this path after a few refusals.
+          if (n >= 3 && bot.pathfinder.isMoving()) bot.pathfinder.stop();
+          throw new Error(`refused to dig ${block.name}: ${why} (use the door)`);
         }
         return (dig as (...a: unknown[]) => Promise<void>)(block, ...rest);
       }) as Bot['dig'];
@@ -298,6 +310,7 @@ export class BotAgent {
       this.manMade.refresh(bot);
       this.timers.push(setInterval(() => {
         if (this.bot?.entity) this.manMade.refresh(this.bot);
+        this.refusedDigs.clear();
       }, 5_000));
       this.running = true;
       this.lastHealth = bot.health;

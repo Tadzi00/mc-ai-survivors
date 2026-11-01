@@ -79,7 +79,10 @@ export function buildObservation(o: ObservationInput): string {
   if (o.seasonsEnabled && o.temp) {
     const t = o.temp;
     lines.push(
-      `Season ${t.season}. Here ${t.tempC.toFixed(1)}C, outside ${t.outsideC.toFixed(1)}C, ${t.comfortable ? 'comfortable' : 'UNCOMFORTABLE'}${t.inside ? `, indoors (${t.sealed ? 'sealed' : 'leaky'})` : ', outdoors'}.`,
+      `Season ${t.season}. Here ${t.tempC.toFixed(1)}C, outside ${t.outsideC.toFixed(1)}C, ${t.comfortable ? 'comfortable' : 'UNCOMFORTABLE'}${t.inside ? `, indoors (${t.sealed ? 'sealed' : 'leaky'})` : ', outdoors'}.` +
+        (t.inside && t.equilibriumC !== undefined && Math.abs(t.equilibriumC - t.tempC) >= 1
+          ? ` This room is ${t.equilibriumC > t.tempC ? 'warming' : 'cooling'} to ${t.equilibriumC.toFixed(1)}C over the next minutes${roomWarm(t) ? ' (that is fine: just wait, no more torches)' : ''}.`
+          : ''),
     );
     if (t.bodyC !== undefined) lines.push(bodyLine(t.bodyC, t.stage ?? 'COMFORTABLE'));
     if (t.day !== undefined && t.seasonDays !== undefined) lines.push(seasonOutlook(t.season, t.day, t.seasonDays));
@@ -208,7 +211,7 @@ function progressFor(o: ObservationInput): string {
     })(),
     hunger: bot.food,
     underground: isUnderground(bot),
-    warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && t.comfortable ? true : undefined) : undefined,
+    warmHome: o.seasonsEnabled && t ? (t.inside && t.sealed && roomWarm(t) ? true : undefined) : undefined,
   });
 }
 
@@ -271,4 +274,12 @@ export function fitObservation(obs: string, systemChars: number, budgetTokens = 
   }
   const out = lines.join('\n');
   return out.length <= budgetChars ? out : out.slice(0, Math.max(500, budgetChars));
+}
+
+/**
+ * A room is warm enough when the temperature it is HEADING to is comfortable (12-28C, same rule as heat_room).
+ * Rooms warm up slowly: judging by the current reading made bots add torch after torch.
+ */
+export function roomWarm(t: { tempC: number; comfortable: boolean; equilibriumC?: number }): boolean {
+  return t.equilibriumC !== undefined ? t.equilibriumC >= 12 && t.equilibriumC <= 28 : t.comfortable;
 }

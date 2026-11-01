@@ -106,10 +106,10 @@ export function milestones(f: ProgressFacts): Milestone[] {
       id: 'heat',
       label: 'warm shelter',
       // with temperature readings: the room must really be warm; without them: having torches is enough
-      done: f.warmHome === true || (f.warmHome === undefined && torches >= 4),
+      done: f.warmHome === true || (f.warmHome === undefined && torches >= 1),
       hint:
-        torches >= 4 || coal > 0
-          ? `inside your shelter: {"skill":"heat_room","args":{}} (a 5x5 room needs ~4 torches)`
+        torches >= 1 || coal > 0
+          ? `inside your shelter: {"skill":"heat_room","args":{}} (often 1 torch is enough; the room then needs a few minutes to warm up)`
           : `need coal for torches: {"skill":"gather","args":{"block":"coal_ore","count":3}} (needs a pickaxe)`,
     },
     {

@@ -530,7 +530,7 @@ export async function extendShelterSkill(ctx: SkillContext, a: SkillArgsOf<'exte
 /**
  * heat_room: place torches inside the room the bot stands in, one at a time, re-checking the real room
  * temperature (RealisticSeasons) after each, until it is comfortable, too hot, or 6 torches were added.
- * A sealed 5x5 room needs about 4 torches (measured: 1 torch +1.5C, 2 +8C, 4 +25C over a cold night).
+ * How many depends on the weather: in summer 1 torch keeps a 5x5 room warm, on a cold night it took ~4.
  */
 export async function heatRoomSkill(ctx: SkillContext, max = 6): Promise<string> {
   const { bot } = ctx;
