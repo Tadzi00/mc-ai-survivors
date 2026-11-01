@@ -19,6 +19,8 @@ export interface ProgressFacts {
   hunger?: number;
   /** true when the bot is in a sealed, comfortable room (from RealisticSeasons), undefined if unknown */
   warmHome?: boolean;
+  /** The village has a wheat field. */
+  fieldKnown?: boolean;
 }
 
 export interface Milestone {
@@ -88,7 +90,7 @@ export function milestones(f: ProgressFacts): Milestone[] {
       id: 'food',
       label: 'spare food (8)',
       done: f.foodCount >= 8,
-      hint: `keep a food reserve of 8+ (cook meat: smelt it, it feeds twice as much): {"skill":"attack","args":{"target":"cow"}} (or pig/chicken/sheep). Share with hungry teammates (give)`,
+      hint: `no animals left around? make a wheat field: {"skill":"farm","args":{"action":"setup"}}. Keep a food reserve of 8+ (cook meat: smelt it, it feeds twice as much): {"skill":"attack","args":{"target":"cow"}} (or pig/chicken/sheep). Share with hungry teammates (give)`,
     },
     {
       id: 'blocks',
@@ -101,6 +103,13 @@ export function milestones(f: ProgressFacts): Milestone[] {
       label: 'sealed shelter',
       done: f.homeKnown,
       hint: `{"skill":"build_shelter","args":{"size":5}}`,
+    },
+    {
+      id: 'field',
+      label: 'wheat field',
+      // animals do not come back once eaten: a field is the food that lasts
+      done: f.fieldKnown === true,
+      hint: `make the village wheat field by water: {"skill":"farm","args":{"action":"setup"}} (it makes a hoe and finds seeds in tall grass)`,
     },
     {
       id: 'heat',

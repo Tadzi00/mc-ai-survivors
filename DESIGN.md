@@ -535,6 +535,14 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   teammate with < 2 food and hunger <= 14 gets up to 6 of our food if we have >= 4; one without a pickaxe gets
   our worst spare. "can you give me food/pickaxe/torches?" in earshot is honoured (`answerRequest`). `give`
   understands "food"/generic names, hands over at 1.5 blocks, and the receiver walks to the dropped items.
+- **Farming, phase 1 (wheat)**: `farm {action:"setup"}` picks the water block near the village with the
+  most flat soil it keeps wet (same y, within 4 blocks; `skills/fieldPlan.ts`, pure), crafts a wooden hoe,
+  collects seeds from tall grass (`gather seeds`), tills only as many tiles as it can plant (bare farmland
+  reverts), plants, and stores `village.json` `field`. `farm {action:"tend"}` harvests ripe wheat (age 7),
+  picks up drops, replants, bakes bread (3 wheat). Chore: by day an idle bot within 64 blocks tends the field
+  every 20 min (the time is shared, first comes first). Ladder step "wheat field"; cheat sheet: animals do
+  not come back, fields need water within 4 blocks (no bucket -> next to a lake/river).
+  Next phases: animal pens + breeding, then a heated greenhouse for winter.
 - **Births** (`population.*`): at most `maxBirthsPerDay` (2) per MC day; only at a bed with a settled bot
   within `birthNeedsBotWithin` (24) blocks; the newborn's home and bed are its birth bed; it is an
   *apprentice* (`apprenticeSeconds`, 300): no digging, no planning (answers only) until the nearest bot has

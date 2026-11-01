@@ -28,6 +28,9 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
 - Torch = coal or charcoal + stick. Charcoal = smelt a log. One torch often keeps a small sealed room warm
   (more in deep winter). A room warms up SLOWLY: after heat_room, wait instead of adding torches. A campfire
   or lit furnace makes a small room too hot.
+- Farming: animals do NOT come back once eaten - a wheat field is food that lasts (bread = 3 wheat).
+  Seeds come from breaking tall grass. Farmland must be within 4 blocks of water: WITHOUT A BUCKET the field
+  has to be right next to a lake or river (a bucket, 3 iron, lets you bring water anywhere).
 - Food: kill animals; cooked meat (smelt it) feeds much more than raw. Food heals you when you are full.
   Always carry SPARE food (8+): hunger comes fast, and winter has few animals. Teammates share: give
   food to a hungry one, ask nearby bots ("can you give me food?") when you run out.

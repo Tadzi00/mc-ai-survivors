@@ -285,3 +285,21 @@ describe('meat names', () => {
     expect(meatName('iron_ingot')).toBe('iron_ingot');
   });
 });
+
+import { bestFieldSite, wetTiles } from '../src/skills/fieldPlan.js';
+describe('field site', () => {
+  const water = [{ x: 0, y: 62, z: 0 }, { x: 40, y: 62, z: 0 }];
+  const soil = [] as Array<{ x: number; y: number; z: number }>;
+  for (let x = -4; x <= 4; x++) for (let z = -4; z <= 4; z++) if (x || z) soil.push({ x, y: 62, z });
+  soil.push({ x: 40, y: 63, z: 1 }); // a step higher: not watered
+  it('waters soil within 4 blocks at the same height only', () => {
+    expect(wetTiles(water[0]!, soil)).toHaveLength(80);
+    expect(wetTiles(water[1]!, soil)).toHaveLength(0);
+  });
+  it('picks the water with the most land, tiles nearest first', () => {
+    const s = bestFieldSite(water, soil, { x: 40, y: 62, z: 0 })!;
+    expect(s.water).toEqual({ x: 0, y: 62, z: 0 });
+    expect(Math.hypot(s.tiles[0]!.x, s.tiles[0]!.z)).toBe(1);
+    expect(bestFieldSite([{ x: 100, y: 62, z: 100 }], soil, { x: 0, y: 0, z: 0 })).toBeUndefined();
+  });
+});

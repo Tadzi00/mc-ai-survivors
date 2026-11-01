@@ -43,7 +43,7 @@ export const SkillArgs = {
   place_torch: z.object({}).passthrough(),
   heat_room: z.object({}).passthrough(),
   farm: z.object({
-    action: z.enum(['till', 'plant', 'harvest']),
+    action: z.enum(['setup', 'tend', 'till', 'plant', 'harvest']),
     crop: z.enum(['wheat', 'carrot', 'potato', 'beetroot']).default('wheat'),
   }),
   chest_store: z.object({ items: itemList }),
@@ -95,7 +95,7 @@ export const SKILL_HELP: Record<SkillName, string> = {
   add_door: 'add_door {} put a door into your shelter if it has none (crafts one from 6 planks)',
   place_torch: 'place_torch {} place a torch next to you (light + heat)',
   heat_room: 'heat_room {} inside your shelter: add torches until the room is heading to a comfortable temperature (often 1 is enough)',
-  farm: 'farm {action:"till"|"plant"|"harvest",crop}',
+  farm: 'farm {action:"setup"} makes the village wheat field by water (hoe+seeds automatic); {action:"tend"} harvests, replants, bakes bread',
   chest_store: 'chest_store {items:["oak_log:10","cobblestone"]} put items into nearest chest',
   chest_take: 'chest_take {items:["iron_ingot:5"]} take items from nearest chest; {items:["list"]} just looks inside',
   give: 'give {player,item,count} toss items to a nearby player',

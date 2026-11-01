@@ -157,6 +157,9 @@ export function buildObservation(o: ObservationInput): string {
     lines.push(
       `VILLAGE at ${fmtPos(v.center)} (${Math.round(distance(me, v.center))}m): all homes and new buildings go here (build_shelter builds next to the others). ` +
         `Buildings: ${bs.join('; ') || 'none yet'}.` +
+        (v.data.field
+          ? ` WHEAT FIELD by the water at ${fmtPos(v.data.field)} (tended ${Math.round((Date.now() - (v.data.field.tendedAt ?? 0)) / 60_000)} min ago): farm {"action":"tend"} harvests, replants, bakes bread.`
+          : '') +
         (v.data.library
           ? ` LIBRARY chest at ${fmtPos(v.data.library)}: library_read to learn what the tribe wrote, library_write to add your knowledge (needs book and quill).`
           : ' No library yet: library_write (needs a book and quill) starts one.'),
@@ -267,6 +270,7 @@ function progressFor(o: ObservationInput): string {
     homeKnown: !!memory.place('home'),
     bedKnown: !!memory.place('bed'),
     spareBedKnown: !!memory.place('spare_bed'),
+    fieldKnown: !!(o.village?.data.field ?? memory.place('field')),
     bedNear: (() => {
       const beds = Object.keys(bot.registry.blocksByName).filter((n) => n.endsWith('_bed'));
       const b = findBlocks(bot, beds, 24, 1)[0];

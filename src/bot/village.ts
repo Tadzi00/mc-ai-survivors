@@ -21,6 +21,8 @@ export interface VillageData {
   buildings: Building[];
   /** The library chest: written books with the tribe's knowledge. */
   library?: P3;
+  /** The wheat field (its water block) and when someone last tended it. */
+  field?: P3 & { planted: number; at: string; tendedAt?: number };
 }
 
 /** Bots farther than this from the village centre walk there before building. */
@@ -53,6 +55,18 @@ export class Village {
     this.data.buildings.push({ ...b, at: new Date().toISOString() });
     if (!this.data.center) this.found({ x: (b.x0 + b.x1) / 2, y: b.y0, z: (b.z0 + b.z1) / 2 }, b.owner);
     this.save();
+  }
+
+  setField(water: P3, planted: number): void {
+    this.data.field = { x: water.x, y: water.y, z: water.z, planted, at: new Date().toISOString(), tendedAt: Date.now() };
+    this.save();
+  }
+
+  tendedField(): void {
+    if (this.data.field) {
+      this.data.field.tendedAt = Date.now();
+      this.save();
+    }
   }
 
   setLibrary(p: P3): void {

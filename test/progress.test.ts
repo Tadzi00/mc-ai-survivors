@@ -18,10 +18,10 @@ describe('progress ladder', () => {
     // shelter comes before better tools
     expect(next({ ...empty, tableNearby: true, items: { wooden_pickaxe: 1, wooden_sword: 1 } })).toBe('food');
     expect(next({ ...empty, tableNearby: true, foodCount: 8, items: { wooden_pickaxe: 1, wooden_sword: 1, dirt: 70 } })).toBe('shelter');
-    expect(next({ ...empty, tableNearby: true, foodCount: 8, homeKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, torch: 4 } })).toBe("stone_pickaxe");
+    expect(next({ ...empty, tableNearby: true, foodCount: 8, homeKnown: true, fieldKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, torch: 4 } })).toBe("stone_pickaxe");
   });
   it('asks for missing cobblestone before a stone pickaxe', () => {
-    const f = { ...empty, tableNearby: true, foodCount: 8, homeKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, cobblestone: 1, torch: 4 } };
+    const f = { ...empty, tableNearby: true, foodCount: 8, homeKnown: true, fieldKnown: true, items: { wooden_pickaxe: 1, wooden_sword: 1, cobblestone: 1, torch: 4 } };
     expect(progressText(f)).toContain('need 2 more cobblestone');
     expect(progressText({ ...f, items: { ...f.items, cobblestone: 3 } })).toContain('"item":"stone_pickaxe"');
   });
@@ -33,7 +33,7 @@ describe('progress ladder', () => {
   it('beds come last and need wool', () => {
     const f: ProgressFacts = {
       items: { stone_pickaxe: 1, stone_sword: 1, torch: 4, white_wool: 1 }, foodCount: 8, tableNearby: true,
-      homeKnown: true, bedKnown: false, spareBedKnown: false,
+      homeKnown: true, fieldKnown: true, bedKnown: false, spareBedKnown: false,
     };
     expect(next(f)).toBe('own_bed');
     expect(progressText(f)).toContain('need 2 more wool');
@@ -55,7 +55,7 @@ describe('bed claiming', () => {
   it('suggests claiming a nearby bed before crafting one', () => {
     const f: ProgressFacts = {
       items: { stone_pickaxe: 1, stone_sword: 1, torch: 4 }, foodCount: 8, tableNearby: true,
-      homeKnown: true, bedKnown: false, spareBedKnown: false, bedNear: { x: 1, y: 64, z: 2 },
+      homeKnown: true, fieldKnown: true, bedKnown: false, spareBedKnown: false, bedNear: { x: 1, y: 64, z: 2 },
     };
     expect(progressText(f)).toContain('there is a bed at 1,64,2');
   });

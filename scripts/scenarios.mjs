@@ -419,6 +419,31 @@ export const scenarios = {
     return ok(n === 2, `${r} | saplings in world=${n}`);
   },
 
+  // A field by the water: setup makes a hoe and plants; tend harvests ripe wheat, replants, bakes bread.
+  async field(ctx, P) {
+    const { X, Y, Z } = P;
+    const cx = X + 6;
+    await P.cmd(`fill ${cx - 4} ${Y - 1} ${Z - 4} ${cx + 4} ${Y - 1} ${Z + 4} minecraft:grass_block`);
+    await P.cmd(`setblock ${cx} ${Y - 1} ${Z} minecraft:water`);
+    await P.give('wheat_seeds', 10);
+    await P.give('oak_planks', 8);
+    await P.sleep(1500);
+    const r1 = await farmSkill(ctx, { action: 'setup', crop: 'wheat' });
+    let planted = 0;
+    for (let x = cx - 4; x <= cx + 4; x++) for (let z = Z - 4; z <= Z + 4; z++) if (await isBlock(P, x, Y, z, 'minecraft:wheat')) planted++;
+    // make 6 of them ripe
+    let made = 0;
+    for (let x = cx - 4; x <= cx + 4 && made < 6; x++) for (let z = Z - 4; z <= Z + 4 && made < 6; z++) {
+      if (await isBlock(P, x, Y, z, 'minecraft:wheat')) { await P.cmd(`setblock ${x} ${Y} ${z} minecraft:wheat[age=7]`); made++; }
+    }
+    await P.sleep(1000);
+    const r2 = await farmSkill(ctx, { action: 'tend', crop: 'wheat' });
+    const bread = await count(P, 'bread');
+    let after = 0;
+    for (let x = cx - 4; x <= cx + 4; x++) for (let z = Z - 4; z <= Z + 4; z++) if (await isBlock(P, x, Y, z, 'minecraft:wheat')) after++;
+    return ok(planted >= 6 && bread >= 1 && after >= planted - 1, `setup: ${r1.slice(0, 90)} | planted=${planted} | tend: ${r2} | bread=${bread} wheat plants after=${after}`);
+  },
+
   async farm(ctx, P) {
     await P.cmd(`fill ${P.X - 3} ${P.Y - 1} ${P.Z - 3} ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:dirt`);
     await P.cmd(`setblock ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:water`);

@@ -6,6 +6,7 @@ import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import { scanRoom } from '../roomPlan.js';
+import { collectSeeds } from './farm.js';
 import { ALLOWED_DIGS, digKey, countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isStandable, isUnderground, v3, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
@@ -47,6 +48,10 @@ const CRAFTED_ONLY = /^(torch(es)?|planks?|.*_planks|sticks?|crafting_table|furn
 export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): Promise<string> {
   const { bot } = ctx;
   const q = a.block.toLowerCase().replace(/^minecraft:/, '');
+  if (/^(wheat_)?seeds?$/.test(q)) {
+    const got = await collectSeeds(ctx, Math.min(a.count, 32));
+    return got ? `broke grass and got ${got} wheat seeds (now ${countItem(bot, 'wheat_seeds')})` : 'no wheat seeds found (no tall grass nearby?)';
+  }
   if (CRAFTED_ONLY.test(q)) {
     const r = await craftSkill(ctx, { item: q.replace(/es$/, '').replace(/^planks?$/, 'planks').replace(/^sticks$/, 'stick'), count: Math.min(a.count, 16) });
     return `${q} is made, not found (use craft): ${r}`;

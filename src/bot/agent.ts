@@ -190,6 +190,14 @@ export class BotAgent {
       const seed = home ?? this.memory.place('village');
       if (seed) v.found(seed, this.name);
     }
+    // The field needs looking after: by day, an idle bot near the village harvests, replants and bakes bread
+    // every ~20 min (whoever gets there first; the time is shared in village.json).
+    const field = v.data.field;
+    if (field && (bot.time.timeOfDay ?? 0) < 11_000 && !this.isApprentice() && !this.forcedStep && !this.planQueue.length &&
+        Date.now() - (field.tendedAt ?? 0) > 20 * 60_000 && Math.hypot(field.x - bot.entity.position.x, field.z - bot.entity.position.z) <= 64) {
+      field.tendedAt = Date.now(); // claim it so not every bot goes
+      this.queueFirst({ skill: 'farm', args: { action: 'tend', crop: 'wheat' }, thought: 'order from myself: tend the village field' });
+    }
     // A bot with a book and quill in the village writes its knowledge into the library (daytime, idle,
     // at most every 30 min).
     const day = (bot.time.timeOfDay ?? 0) < 12_000;
