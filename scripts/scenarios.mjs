@@ -444,6 +444,22 @@ export const scenarios = {
     return ok(planted >= 6 && bread >= 1 && after >= planted - 1, `setup: ${r1.slice(0, 90)} | planted=${planted} | tend: ${r2} | bread=${bread} wheat plants after=${after}`);
   },
 
+  // A sandy shore: swap sand for the dirt we carry, till, plant.
+  async field_sand(ctx, P) {
+    const { X, Y, Z } = P;
+    const cx = X + 6;
+    await P.cmd(`fill ${cx - 3} ${Y - 1} ${Z - 3} ${cx + 3} ${Y - 1} ${Z + 3} minecraft:sand`);
+    await P.cmd(`setblock ${cx} ${Y - 1} ${Z} minecraft:water`);
+    await P.give('wheat_seeds', 8);
+    await P.give('dirt', 16);
+    await P.give('wooden_hoe', 1);
+    await P.sleep(1500);
+    const r = await farmSkill(ctx, { action: 'setup', crop: 'wheat' });
+    let planted = 0;
+    for (let x = cx - 3; x <= cx + 3; x++) for (let z = Z - 3; z <= Z + 3; z++) if (await isBlock(P, x, Y, z, 'minecraft:wheat')) planted++;
+    return ok(planted >= 6, `${r.slice(0, 120)} | planted=${planted}`);
+  },
+
   async farm(ctx, P) {
     await P.cmd(`fill ${P.X - 3} ${P.Y - 1} ${P.Z - 3} ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:dirt`);
     await P.cmd(`setblock ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:water`);

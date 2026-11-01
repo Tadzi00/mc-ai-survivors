@@ -1,9 +1,13 @@
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, gotoNear, isAirLike, isEmptyCell, v3, type Vec3 } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, gotoNear, isAirLike, isEmptyCell, placeItemAt, v3, type Vec3 } from '../helpers.js';
 import { bestFieldSite } from '../fieldPlan.js';
 import { craftSkill } from './resources.js';
+
+/** Ground a hoe turns into farmland, and shore ground we replace with dirt first. */
+const TILLABLE = ['grass_block', 'dirt', 'dirt_path', 'coarse_dirt', 'rooted_dirt'];
+const SWAPPABLE = ['sand', 'gravel', 'podzol', 'red_sand', 'mycelium', 'clay'];
 
 const CROPS = {
   wheat: { block: 'wheat', seed: 'wheat_seeds', maxAge: 7 },
@@ -37,16 +41,31 @@ async function setupField(ctx: SkillContext): Promise<string> {
   if (known) return `the village already has a field at ${fmtPos(known)} - use farm {"action":"tend"} there`;
   const center = ctx.village?.center ?? ctx.memory.place('home') ?? bot.entity.position.floored();
   if (bot.entity.position.distanceTo(v3(center.x, center.y, center.z)) > 24) await gotoNear(ctx, center.x, center.y, center.z, 3, 90_000).catch(() => undefined);
-  const waterId = bot.registry.blocksByName.water!.id;
-  const waters = bot
-    .findBlocks({ matching: waterId, maxDistance: 48, count: 400 })
-    .filter((p) => isAirLike(bot.blockAt(p.offset(0, 1, 0))));
-  const soilIds = new Set(['grass_block', 'dirt'].map((n) => bot.registry.blocksByName[n]!.id));
-  const soil = bot
-    .findBlocks({ matching: (b) => soilIds.has(b.type), maxDistance: 52, count: 3000 })
-    .filter((p) => isEmptyCell(bot.blockAt(p.offset(0, 1, 0))));
-  const site = bestFieldSite(waters, soil, center);
-  if (!site) return 'no water with flat dry land next to it within ~48 blocks: a field needs water within 4 blocks (or carry water in a bucket: 3 iron)';
+  const look = (): ReturnType<typeof bestFieldSite> => {
+    const waterId = bot.registry.blocksByName.water!.id;
+    const waters = bot
+      .findBlocks({ matching: waterId, maxDistance: 56, count: 600 })
+      .filter((p) => isAirLike(bot.blockAt(p.offset(0, 1, 0))));
+    // Tillable ground, plus shore blocks we can swap for a dirt block (sand, gravel, podzol...).
+    const soilIds = new Set([...TILLABLE, ...SWAPPABLE].map((n) => bot.registry.blocksByName[n]?.id).filter((x): x is number => x !== undefined));
+    const soil = bot
+      .findBlocks({ matching: (b) => soilIds.has(b.type), maxDistance: 60, count: 4000 })
+      .filter((p) => isEmptyCell(bot.blockAt(p.offset(0, 1, 0))));
+    return bestFieldSite(waters, soil, center);
+  };
+  let site = look();
+  if (!site) {
+    // Go to the nearest water we remember and look again there.
+    const me = bot.entity.position;
+    const w = (ctx.memory.data.discoveries ?? [])
+      .filter((d) => d.what === 'water' && Math.hypot(d.x - me.x, d.z - me.z) <= 150)
+      .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z))[0];
+    if (w) {
+      await gotoNear(ctx, w.x, w.y, w.z, 4, 90_000).catch(() => undefined);
+      site = look();
+    }
+  }
+  if (!site) return 'no water with flat land next to it nearby (or remembered): a field needs water within 4 blocks at the same height (or carry water in a bucket: 3 iron)';
   // hoe and seeds
   if (!findItem(bot, /_hoe$/)) {
     const r = await craftSkill(ctx, { item: 'wooden_hoe', count: 1 });
@@ -57,7 +76,10 @@ async function setupField(ctx: SkillContext): Promise<string> {
   const seeds = countItem(bot, 'wheat_seeds');
   if (seeds === 0) return 'no wheat seeds (break tall grass to find some) - nothing to plant yet';
   // till only as many as we can plant (bare farmland turns back into dirt)
-  const tiles = site.tiles.slice(0, Math.min(want, seeds));
+  // prefer real soil; swap shore blocks only while we carry dirt
+  const isSoil = (t: { x: number; y: number; z: number }): boolean => TILLABLE.includes(bot.blockAt(v3(t.x, t.y, t.z))?.name ?? '');
+  const ordered = [...site.tiles.filter(isSoil), ...site.tiles.filter((t) => !isSoil(t)).slice(0, countItem(bot, 'dirt'))];
+  const tiles = ordered.slice(0, Math.min(want, seeds));
   const tilled = await tillAndPlant(ctx, tiles);
   const w = site.water;
   ctx.village?.setField({ x: w.x, y: w.y, z: w.z }, tilled);
@@ -78,7 +100,15 @@ async function tillAndPlant(ctx: SkillContext, tiles: Vec3[] | Array<{ x: number
     if (!seed) break;
     await gotoNear(ctx, p.x, p.y, p.z, 2, 15_000).catch(() => undefined);
     let b = bot.blockAt(p);
-    if (b && (b.name === 'grass_block' || b.name === 'dirt') && hoe) {
+    // Sand/gravel/podzol on the shore: put a dirt block there first.
+    if (b && SWAPPABLE.includes(b.name)) {
+      const dirt = findItem(bot, 'dirt');
+      if (!dirt) continue;
+      await bot.dig(b, true).catch(() => undefined);
+      await placeItemAt(ctx, dirt, p);
+      b = bot.blockAt(p);
+    }
+    if (b && TILLABLE.includes(b.name) && hoe) {
       const above = bot.blockAt(p.offset(0, 1, 0));
       if (above && above.name !== 'air' && isEmptyCell(above)) await bot.dig(above, true).catch(() => undefined); // grass on top
       await bot.equip(hoe, 'hand');
