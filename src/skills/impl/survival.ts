@@ -25,6 +25,31 @@ export function nearestEntity(ctx: SkillContext, target: string, maxDist = 24): 
 
 const FOOD_ANIMALS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom'];
 
+/**
+ * Pick ripe sweet berries (right-click, the bush stays and regrows) from up to 6 bushes within 48 blocks.
+ * Returns how many berries were gained.
+ */
+export async function pickBerries(ctx: SkillContext): Promise<number> {
+  const { bot } = ctx;
+  const id = bot.registry.blocksByName.sweet_berry_bush?.id;
+  if (id === undefined) return 0;
+  const count = (): number => bot.inventory.items().filter((i) => i.name === 'sweet_berries').reduce((n, i) => n + i.count, 0);
+  const before = count();
+  const ripe = bot
+    .findBlocks({ matching: (b) => b.type === id && Number((b.getProperties() as { age?: number }).age ?? 0) >= 2, maxDistance: 48, count: 12 })
+    .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position));
+  for (const p of ripe.slice(0, 6)) {
+    throwIfAborted(ctx.signal);
+    await gotoNear(ctx, p.x, p.y, p.z, 2, 20_000).catch(() => undefined);
+    const b = bot.blockAt(p);
+    if (b && b.type === id) await bot.activateBlock(b).catch(() => undefined);
+    await sleep(400);
+    const drop = Object.values(bot.entities).find((e) => e.name === 'item' && e.position.distanceTo(p) < 3);
+    if (drop) await gotoNear(ctx, drop.position.x, drop.position.y, drop.position.z, 0, 4000).catch(() => undefined);
+  }
+  return count() - before;
+}
+
 /** Any food animal remembered within 160 blocks? */
 function rememberedPrey(ctx: SkillContext): boolean {
   const me = ctx.bot.entity.position;
@@ -67,7 +92,12 @@ export async function attackSkill(ctx: SkillContext, a: SkillArgsOf<'attack'>): 
         }
       }
     }
-    if (!e) return `no animals to eat within 48 blocks even after exploring ~110 blocks; try another area, fish, or gather sweet berries / apples (oak leaves)`;
+    if (!e) {
+      // No animals left here (they hardly respawn): ripe sweet berries keep you alive.
+      const berries = await pickBerries(ctx);
+      if (berries > 0) return `no animals around, picked ${berries} sweet berries instead (eat them; the bushes regrow)`;
+      return `no animals to eat within 48 blocks even after exploring ~110 blocks and no ripe berry bushes; try another area or farm (seeds from grass)`;
+    }
   }
   if (substitute) ctx.log(`no ${target} around, hunting a ${substitute} instead`);
   if (!e) {

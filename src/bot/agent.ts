@@ -379,6 +379,8 @@ export class BotAgent {
         if (block.safe || cost >= 100) return cost;
         return cost + doorDigPenalty(block.position, this.manMade.doors);
       };
+      // Swimming is slow and drowns hungry bots: walk around water when there is a way.
+      (moves as unknown as { liquidCost: number }).liquidCost = 5; // not in the typings
       // Lava: no stepping on cells above lava, a heavy cost along lava edges.
       moves.exclusionAreasStep.push((block: { position: Vec3 }) => this.lava.stepCost(block.position));
       // Never dig next to water/lava or under sand/gravel. collectblock switches these OFF on every gather

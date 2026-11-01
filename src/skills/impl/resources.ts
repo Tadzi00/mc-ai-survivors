@@ -436,7 +436,7 @@ function woodAlias(bot: Bot, name: string): string {
 export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Promise<string> {
   const { bot } = ctx;
   // Cooking/smelting is not crafting: "craft cooked_beef" (and "cooked_cow") never worked.
-  const want = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/^cooked_cow$/, 'cooked_beef').replace(/^cooked_pig$/, 'cooked_porkchop').replace(/^cooked_sheep$/, 'cooked_mutton');
+  const want = meatName(a.item.toLowerCase().replace(/^minecraft:/, ''));
   if (SMELT_INPUT[want] && want !== 'stone') {
     const r = await smeltSkill(ctx, { item: want, count: a.count });
     return `${want} is smelted, not crafted: ${r}`;
@@ -536,6 +536,16 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
   return `cannot craft ${item.name}: ${problems.join('; ')}`;
 }
 
+/**
+ * Meat names models invent -> real items: "raw_cow_steak" -> beef, "cooked_cow_steak" -> cooked_beef,
+ * "raw_cooked_cow" -> beef, "pork" -> porkchop. PURE.
+ */
+export function meatName(n: string): string {
+  const animal = /cow|beef|steak/.test(n) ? 'beef' : /pig|pork/.test(n) ? 'porkchop' : /sheep|mutton|lamb/.test(n) ? 'mutton' : /chicken/.test(n) ? 'chicken' : /rabbit/.test(n) ? 'rabbit' : '';
+  if (!animal) return n;
+  return /cooked/.test(n) && !/raw/.test(n) ? `cooked_${animal}` : animal;
+}
+
 const SMELT_INPUT: Record<string, string> = {
   iron_ingot: 'raw_iron', gold_ingot: 'raw_gold', copper_ingot: 'raw_copper', glass: 'sand', stone: 'cobblestone',
   charcoal: 'oak_log', cooked_beef: 'beef', cooked_porkchop: 'porkchop', cooked_chicken: 'chicken',
@@ -545,7 +555,7 @@ const SMELT_INPUT: Record<string, string> = {
 
 export async function smeltSkill(ctx: SkillContext, a: SkillArgsOf<'smelt'>): Promise<string> {
   const { bot } = ctx;
-  let inputName = a.item.toLowerCase().replace(/^minecraft:/, '').replace(/^raw_(beef|porkchop|mutton|chicken|rabbit|cod|salmon)$/, '$1').replace(/^cooked_cow$/, 'cooked_beef');
+  let inputName = meatName(a.item.toLowerCase().replace(/^minecraft:/, ''));
   if (SMELT_INPUT[inputName]) inputName = SMELT_INPUT[inputName]!;
   // "smelt meat"/"food": whatever raw meat we carry
   if (/^(meat|food|raw_meat)$/.test(inputName)) inputName = findItem(bot, /^(beef|porkchop|mutton|chicken|rabbit|cod|salmon)$/)?.name ?? inputName;

@@ -274,3 +274,14 @@ describe('relevant knowledge for questions', () => {
     expect(relevantKnowledge('hi', [{ from: 'x', text: 'hi there' }])).toEqual([]);
   });
 });
+
+import { meatName } from '../src/skills/impl/resources.js';
+describe('meat names', () => {
+  it('maps invented names', () => {
+    expect(meatName('raw_cow_steak')).toBe('beef');
+    expect(meatName('cooked_cow_steak')).toBe('cooked_beef');
+    expect(meatName('raw_cooked_cow')).toBe('beef');
+    expect(meatName('pork')).toBe('porkchop');
+    expect(meatName('iron_ingot')).toBe('iron_ingot');
+  });
+});

@@ -3,7 +3,7 @@
 import { writeSignSkill, readSignsSkill, writeBookSkill, readBookSkill } from '../dist/skills/impl/knowledge.js';
 import { smeltSkill, gatherSkill, craftSkill } from '../dist/skills/impl/resources.js';
 import { placeBedSkill, addDoorSkill, plantSaplingSkill, placeTorchSkill, heatRoomSkill, buildShelterSkill } from '../dist/skills/impl/building.js';
-import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.js';
+import { sleepSkill, attackSkill, eatSkill, pickBerries } from '../dist/skills/impl/survival.js';
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
 import { digBunker, emergencyHut, leaveHut } from '../dist/skills/helpers.js';
@@ -384,6 +384,18 @@ export const scenarios = {
     const r = await craftSkill(ctx, { item: 'cooked_cow', count: 3 });
     const cooked = await count(P, 'cooked_beef');
     return ok(cooked === 3, `${r} | cooked_beef=${cooked}`);
+  },
+
+  // No animals: ripe sweet berries are picked (right-click), the bushes stay.
+  async berries(ctx, P) {
+    for (const dz of [-2, 2]) {
+      await P.cmd(`setblock ${P.X + 4} ${P.Y - 1} ${P.Z + dz} minecraft:grass_block`);
+      await P.cmd(`setblock ${P.X + 4} ${P.Y} ${P.Z + dz} minecraft:sweet_berry_bush[age=3]`);
+    }
+    await P.sleep(1000);
+    const n = await pickBerries(ctx);
+    const bushes = (await isBlock(P, P.X + 4, P.Y, P.Z - 2, 'minecraft:sweet_berry_bush')) && (await isBlock(P, P.X + 4, P.Y, P.Z + 2, 'minecraft:sweet_berry_bush'));
+    return ok(n >= 2 && bushes, `picked ${n} berries, bushes still there=${bushes}`);
   },
 
   async eat(ctx, P) {
