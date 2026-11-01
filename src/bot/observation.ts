@@ -33,6 +33,8 @@ export interface ObservationInput {
   silentSeconds?: number;
   /** The shared village (buildings overview). */
   village?: Village;
+  /** Steps still queued from the current plan / a player's order. */
+  queued?: readonly { skill: string; args: Record<string, unknown>; thought: string }[];
 }
 
 const CATEGORIES: Array<[string, (n: string) => boolean]> = [
@@ -199,6 +201,19 @@ export function buildObservation(o: ObservationInput): string {
   if (memory.data.notes.length) {
     lines.push('Your notes:');
     for (const n of memory.data.notes.slice(-12)) lines.push(`  - ${n}`);
+  }
+  // What it was thinking lately and what is still planned: every decision is a fresh prompt, so without
+  // this the model forgot its own intentions and flip-flopped (built again right after building).
+  const thoughts = memory.data.thoughts ?? [];
+  if (thoughts.length) {
+    const ago = (at: number): string => {
+      const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+      return s < 90 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
+    };
+    lines.push(`Your recent thinking (oldest first): ${thoughts.map((t) => `"${t.text}" (${ago(t.at)})`).join('; ')}.`);
+  }
+  if (o.queued?.length) {
+    lines.push(`Still planned: ${o.queued.map((q) => `${q.skill}${Object.keys(q.args).length ? ' ' + JSON.stringify(q.args) : ''}${q.thought.startsWith('order from') ? ' (order)' : ''}`).join(' -> ')}.`);
   }
   if (o.recentResults.length) {
     lines.push('Last actions:');

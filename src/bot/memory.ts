@@ -21,6 +21,8 @@ export interface MemoryData {
   storage?: Record<string, Chest>;
   /** Outlines of shelters/rooms this bot built (outer walls), for extend_shelter. */
   shelters?: Array<{ x0: number; z0: number; x1: number; z1: number; y0: number }>;
+  /** The model's last few thoughts (why it chose what it did), newest last. */
+  thoughts?: Array<{ text: string; at: number }>;
   /** A player's standing order, kept across restarts until it expires (epoch ms). */
   order?: { from: string; text: string; until: number };
 }
@@ -212,6 +214,17 @@ export class Memory {
     const [gone] = list.splice(n - 1, 1);
     this.save();
     return gone;
+  }
+
+  /** Keeps the last 3 distinct thoughts (shown to the model so it remembers what it was up to). */
+  addThought(text: string): void {
+    const t = text.trim().slice(0, 160);
+    if (!t) return;
+    const list = (this.data.thoughts ??= []);
+    if (list.at(-1)?.text === t) list[list.length - 1]!.at = Date.now();
+    else list.push({ text: t, at: Date.now() });
+    if (list.length > 3) list.splice(0, list.length - 3);
+    this.save();
   }
 
   setOrder(order: { from: string; text: string; until: number } | undefined): void {

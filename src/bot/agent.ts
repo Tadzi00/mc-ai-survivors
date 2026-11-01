@@ -1386,6 +1386,7 @@ export class BotAgent {
       helpActive: !!this.helpCall,
       silentSeconds: (Date.now() - this.lastSpokeAt) / 1000,
       village: this.deps.village,
+      queued: this.forcedStep ? [this.forcedStep, ...this.planQueue] : this.planQueue,
     });
     this.interruptedBy = undefined;
     this.planNote = undefined;
@@ -1410,6 +1411,8 @@ export class BotAgent {
       });
       if (parsed.ok) {
         this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
+        const plan = parsed.steps.map((x) => x.skill).join(' -> ');
+        this.memory.addThought(`${this.lastThought}${parsed.steps.length > 1 ? ` [plan: ${plan}]` : ` [${plan}]`}`);
         const answeringTo = this.replyTo;
         this.replyTo = undefined;
         // At most one model conclusion per 3 minutes (it drew one almost every turn), unless a player
