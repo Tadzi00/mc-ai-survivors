@@ -203,3 +203,15 @@ describe('lesson hygiene', () => {
     expect(t.some((l) => /Conclusion: -|Conclusion: Conclusion/.test(l))).toBe(false);
   });
 });
+
+import { parsePlan } from '../src/bot/action.js';
+describe('forget field', () => {
+  it('parses a lesson number to forget', () => {
+    const r = parsePlan('{"thought":"t","learned":"cows avoid caves","forget":3,"skill":"wait","args":{"seconds":5}}', 'basic');
+    expect(r.ok && r.forget).toBe(3);
+    const s = parsePlan('{"thought":"t","forget":"[7]","plan":[{"skill":"wait","args":{"seconds":5}}]}', 'smart');
+    expect(s.ok && s.forget).toBe(7);
+    const n = parsePlan('{"thought":"t","forget":0,"skill":"wait","args":{"seconds":5}}', 'basic');
+    expect(n.ok && n.forget).toBe(undefined);
+  });
+});

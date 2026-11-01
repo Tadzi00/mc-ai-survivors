@@ -131,7 +131,10 @@ export function lessonSimilarity(a: string, b: string): number {
  * Adds a lesson unless an equivalent one exists (same start, or mostly the same words). Over the cap the
  * oldest model "Conclusion:" goes first; lessons from real failures, mentors and players stay longer. PURE.
  */
-export function addLesson(list: string[], lesson: string, cap = 15): string[] {
+/** Max lessons kept per bot. */
+export const LESSON_CAP = 15;
+
+export function addLesson(list: string[], lesson: string, cap = LESSON_CAP): string[] {
   const l = lesson.trim().slice(0, 160);
   const key = cleanLesson(l).toLowerCase().slice(0, 50);
   if (!cleanLesson(l) || list.some((o) => cleanLesson(o).toLowerCase().slice(0, 50) === key || lessonSimilarity(o, l) >= 0.4)) return list;
@@ -144,7 +147,7 @@ export function addLesson(list: string[], lesson: string, cap = 15): string[] {
 }
 
 /** Cleans a stored lesson list: labels fixed, to-dos and near-duplicates removed (older files). PURE. */
-export function tidyLessons(list: string[], cap = 15): string[] {
+export function tidyLessons(list: string[], cap = LESSON_CAP): string[] {
   let out: string[] = [];
   for (const raw of list) {
     const isConclusion = /^\s*(?:[-*•]\s*)?conclusion\s*:/i.test(raw);
@@ -200,6 +203,15 @@ export class Memory {
   conclude(text: string): boolean {
     if (!isLessonWorthy(text)) return false;
     return this.learn(`Conclusion: ${cleanLesson(text)}`);
+  }
+
+  /** The model asked to drop lesson [n] (1-based, as shown in its observation). Returns the dropped text. */
+  forgetLesson(n: number): string | undefined {
+    const list = this.data.lessons ?? [];
+    if (n < 1 || n > list.length) return undefined;
+    const [gone] = list.splice(n - 1, 1);
+    this.save();
+    return gone;
   }
 
   setOrder(order: { from: string; text: string; until: number } | undefined): void {

@@ -46,6 +46,8 @@ const SOCIAL = `TALK A LOT - you all start knowing almost nothing and only survi
   (e.g. "cows live on grass under open sky, not in caves", "iron ore needs a stone pickaxe"). It is saved
   forever in your lessons; share good ones with others. Only NEW facts about this world or why something
   failed. Not plans or to-dos ("need to hunt"), not obvious things ("wood is important"). Usually leave it out.
+  Add "forget":<number> to delete your lesson [number] when it proved wrong or useless. When your lessons are
+  FULL you must forget one to save a new one: pick the least useful.
 - Use shout for important far-away news (village spot, danger, found iron). Write signs/books so the
   knowledge survives you.`;
 
@@ -56,10 +58,10 @@ Death is permanent. say reaches 15 blocks; shout reaches 1000 blocks (max 15 wor
 there. Read signs for knowledge.`;
 
 const FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 20 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","skill":"<skill name>","args":{...}}`;
+{"thought":"<max 20 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","forget":<optional lesson number>,"skill":"<skill name>","args":{...}}`;
 
 const SMART_FORMAT = `Reply with ONLY one JSON object, no prose:
-{"thought":"<max 30 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
+{"thought":"<max 30 words>","say":"<optional: words to nearby bots>","learned":"<optional: a conclusion worth remembering>","forget":<optional lesson number>,"plan":[{"skill":"<name>","args":{...}}, ... up to 5 steps]}`;
 
 export interface ShoutRules {
   range: number;

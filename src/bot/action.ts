@@ -25,7 +25,7 @@ export function parseAction(text: string, tier: Tier): ParseResult {
   const o = { ...(obj as Record<string, unknown>) };
   if (o.skill === undefined && typeof o.action === 'string') o.skill = o.action;
   if (o.args === undefined) {
-    const { thought: _t, skill: _s, action: _a, say: _say, learned: _l, ...rest } = o;
+    const { thought: _t, skill: _s, action: _a, say: _say, learned: _l, forget: _f, ...rest } = o;
     o.args = rest;
   }
   const env = Envelope.safeParse(o);
@@ -49,7 +49,7 @@ export function parseAction(text: string, tier: Tier): ParseResult {
 export const MAX_PLAN_STEPS = 5;
 
 export type PlanResult =
-  | { ok: true; thought: string; steps: PlannedAction[]; say?: string; learned?: string }
+  | { ok: true; thought: string; steps: PlannedAction[]; say?: string; learned?: string; forget?: number }
   | { ok: false; error: string };
 
 /** Optional conclusion the bot drew ("cows don't live in caves"); stored as a lasting lesson. */
@@ -57,6 +57,12 @@ function learnedOf(o: Record<string, unknown>): string | undefined {
   if (typeof o.learned !== 'string') return undefined;
   const t = o.learned.trim().slice(0, 160);
   return t.length >= 8 ? t : undefined;
+}
+
+/** Optional lesson number to drop ("forget": 3 or "[3]"): a wrong/useless lesson, or room for a new one. */
+function forgetOf(o: Record<string, unknown>): number | undefined {
+  const n = typeof o.forget === 'number' ? o.forget : typeof o.forget === 'string' ? Number(/\d+/.exec(o.forget)?.[0]) : NaN;
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
 }
 
 /** Optional free speech that comes with any reply: {"say":"..."}; spoken to nearby players, costs no turn. */
@@ -79,7 +85,7 @@ export function parsePlan(text: string, tier: Tier): PlanResult {
   const rawSteps = Array.isArray(o.plan) ? o.plan : Array.isArray(o.steps) ? o.steps : undefined;
   if (!rawSteps) {
     const single = parseAction(text, tier);
-    return single.ok ? { ok: true, thought: single.action.thought, steps: [single.action], say: sayOf(o), learned: learnedOf(o) } : single;
+    return single.ok ? { ok: true, thought: single.action.thought, steps: [single.action], say: sayOf(o), learned: learnedOf(o), forget: forgetOf(o) } : single;
   }
   if (rawSteps.length === 0) return { ok: false, error: 'plan is empty' };
   const thought = typeof o.thought === 'string' ? o.thought.slice(0, 300) : '';
@@ -90,7 +96,7 @@ export function parsePlan(text: string, tier: Tier): PlanResult {
     if (!r.ok) return { ok: false, error: `plan step ${i + 1}: ${r.error}` };
     steps.push({ ...r.action, thought: r.action.thought || thought });
   }
-  return { ok: true, thought, steps, say: sayOf(o), learned: learnedOf(o) };
+  return { ok: true, thought, steps, say: sayOf(o), learned: learnedOf(o), forget: forgetOf(o) };
 }
 
 /** Heuristic: did a skill result string report failure? Used to abandon the rest of a plan. */

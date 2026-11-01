@@ -22,7 +22,7 @@ import { fallbackAction, looksFailed, parsePlan, type PlannedAction } from './ac
 import { shoutCooldownLeft, tryShout } from '../skills/impl/knowledge.js';
 import { enableServerCrafting } from '../skills/impl/resources.js';
 import type { CommandRunner } from '../rcon/rcon.js';
-import { lessonFrom, parseChestReport } from './memory.js';
+import { addLesson, cleanLesson, isLessonWorthy, lessonFrom, parseChestReport } from './memory.js';
 import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
@@ -1237,6 +1237,21 @@ export class BotAgent {
         // At most one model conclusion per 3 minutes (it drew one almost every turn), unless a player
         // just taught it something in a private message.
         const taught = Date.now() - this.lastWhisperAt < 120_000;
+        // The model picks what to drop. Only when it also saves a lesson, or names a lesson it calls wrong;
+        // a full list with a new lesson and no choice falls back to the automatic eviction in addLesson.
+        const lessons = this.memory.data.lessons ?? [];
+        const canLearn =
+          !!parsed.learned &&
+          (taught || Date.now() - this.lastConclusionAt > 180_000) &&
+          isLessonWorthy(parsed.learned) &&
+          addLesson(lessons, `Conclusion: ${cleanLesson(parsed.learned)}`) !== lessons; // not a repeat
+        if (parsed.forget !== undefined && (canLearn || !parsed.learned)) {
+          const gone = this.memory.forgetLesson(parsed.forget);
+          if (gone) {
+            this.log('info', `forgot lesson [${parsed.forget}]: ${gone}`);
+            this.jsonl.write('forget', { n: parsed.forget, text: gone });
+          }
+        }
         if (parsed.learned && (taught || Date.now() - this.lastConclusionAt > 180_000) && this.memory.conclude(parsed.learned)) {
           this.lastConclusionAt = Date.now();
           this.log('info', `concluded: ${parsed.learned}`);

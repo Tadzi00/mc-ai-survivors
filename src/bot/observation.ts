@@ -3,7 +3,7 @@ import type { SeasonsReading } from '../contracts.js';
 import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS, isUnderground } from '../skills/helpers.js';
 import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
-import { cleanLesson, type Memory } from './memory.js';
+import { cleanLesson, LESSON_CAP, type Memory } from './memory.js';
 import { progressText } from './progress.js';
 
 export interface ObservationInput {
@@ -139,10 +139,17 @@ export function buildObservation(o: ObservationInput): string {
     .slice(0, 8)
     .map(({ d, dist }) => `${d.what} ${d.x},${d.y},${d.z} (${Math.round(dist)}m ${compass(me, d)})`);
   if (disc.length) lines.push(`Found earlier: ${disc.join('; ')}.`);
-  const lessons = (memory.data.lessons ?? []).slice(-8);
-  if (lessons.length) {
-    lines.push('Lessons learned (share them!):');
-    for (const l of lessons) lines.push(`  - ${cleanLesson(l)}`);
+  const all = memory.data.lessons ?? [];
+  const full = all.length >= LESSON_CAP;
+  // Full: show every lesson so the model can pick which to forget; otherwise the newest 8.
+  const shown = all.map((l, i) => ({ l, n: i + 1 })).slice(full ? 0 : -8);
+  if (shown.length) {
+    lines.push(
+      full
+        ? `Lessons learned (FULL ${all.length}/${LESSON_CAP}: to save a new one in "learned", also give "forget":<number> of the least useful):`
+        : 'Lessons learned (share them!):',
+    );
+    for (const { l, n } of shown) lines.push(`  - [${n}] ${cleanLesson(l)}`);
   }
 
   // Social: teammates in earshot, calls for help.
