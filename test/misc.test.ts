@@ -254,3 +254,18 @@ describe('village plots', () => {
     expect(buildingAt([b], { x: 9, y: 64, z: 3 })).toBeUndefined();
   });
 });
+
+import { relevantKnowledge } from '../src/bot/knowledge.js';
+describe('relevant knowledge for questions', () => {
+  it('finds the book that answers the question', () => {
+    const k = relevantKnowledge('on what level can you find diamonds?', [
+      { from: 'your lessons', text: 'Cows live on grass' },
+      { from: 'your book "Diamond Locations"', text: 'Diamonds are found from Y = -64 to Y = 16.' },
+    ]);
+    expect(k).toHaveLength(1);
+    expect(k[0]).toContain('-64');
+  });
+  it('nothing for small talk', () => {
+    expect(relevantKnowledge('hi', [{ from: 'x', text: 'hi there' }])).toEqual([]);
+  });
+});

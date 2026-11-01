@@ -123,7 +123,9 @@ async function bookText(name) {
   const out = await cmd(`data get entity ${name} Inventory`);
   const i = out.indexOf('written_book');
   if (i < 0) return undefined;
-  const m = /Slot: (\d+)b[^{}]*id: "minecraft:written_book"/.exec(out) ?? /id: "minecraft:written_book"[^]*?Slot: (\d+)b/.exec(out.slice(Math.max(0, i - 400)));
+  // the item compound is {count: 1, Slot: 3b, id: "minecraft:written_book", ...}: take the Slot just before
+  const before = [...out.slice(0, i).matchAll(/Slot: (\d+)b/g)].pop();
+  const m = before;
   const pages = [...out.slice(i, i + 3000).matchAll(/raw: "((?:[^"\\]|\\.)*)"/g)].map((x) => x[1]);
   return { slot: m ? Number(m[1]) : undefined, text: pages.join(' | ') || out.slice(i, i + 400) };
 }
@@ -194,9 +196,12 @@ const trials = {
     const wrote = !!book && /-?64/.test(book.text) && /16/.test(book.text);
     // reader gets THAT book
     const reader = 'TestT_reader';
-    const answer = book?.slot !== undefined
+    // the writer has left by now: give the reader a copy of exactly what it wrote
+    const pageText = (/raw: '\\?"((?:[^'\\]|\\.)*?)\\?"'/.exec(book?.text ?? '')?.[1] ?? '').replace(/\\"/g, '"');
+    const answer = pageText
       ? await askFresh(reader, 'on what level can you find diamonds?', async (n) => {
-          await cmd(`item replace entity ${n} hotbar.1 from entity ${name} ${book.slot < 9 ? 'hotbar.' + book.slot : 'inventory.' + (book.slot - 9)}`);
+          const r = await cmd(`give ${n} written_book[written_book_content={title:"Notes",author:"${name}",pages:['${JSON.stringify(pageText).replace(/'/g, "\\'")}']}]`);
+          console.log('  gave the book:', r.slice(0, 80), '| text:', pageText);
         })
       : '(no book to give)';
     const readIt = story(reader).some((l) => /read_book/.test(l));
@@ -213,16 +218,20 @@ const trials = {
     await sleep(1000);
     await cmd(`tell ${name} put up a sign that says diamonds are found from Y = -64 to Y = 16`);
     let signText = '';
+    let signPos;
     const used = await workFor(150, async () => {
       const bot = a.bot;
       if (!bot?.entity) return false;
       const signs = bot.findBlocks({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 8, count: 4 });
       signText = signs.map((p) => JSON.stringify(bot.blockAt(p)?.getSignText?.() ?? '')).join(' ');
+      if (signs[0]) signPos = signs[0];
       return signs.length > 0;
     });
     a.stop();
     await cmd(`whitelist remove ${name}`);
-    const answer = await askFresh('TestT_reader2', 'on what level can you find diamonds?', async () => {});
+    const answer = await askFresh('TestT_reader2', 'on what level can you find diamonds?', async (n) => {
+      if (signPos) await cmd(`tp ${n} ${signPos.x + 2.5} ${Y} ${signPos.z + 0.5}`); // walks past the sign
+    });
     const readIt = story('TestT_reader2').some((l) => /read_signs/.test(l));
     console.log(`  [reader story]\n${story('TestT_reader2').join('\n')}`);
     const ok = /-?64/.test(signText) && /-?64/.test(answer) && /16/.test(answer);

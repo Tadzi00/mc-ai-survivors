@@ -18,12 +18,21 @@ const Envelope = z.object({
   args: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
+const SKILL_ALIASES: Record<string, string> = {
+  place_sign: 'write_sign', sign: 'write_sign', make_sign: 'write_sign', read_sign: 'read_signs',
+  book: 'write_book', write: 'write_book', read: 'read_book', mine: 'gather', chop: 'gather', collect: 'gather',
+  walk: 'goto', move: 'goto', go: 'goto', kill: 'attack', hunt: 'attack', build: 'build_shelter',
+  bed: 'place_bed', torch: 'place_torch', store: 'chest_store', take: 'chest_take', talk: 'say', speak: 'say',
+};
+
 /** Accepts {"thought","skill","args"}; tolerates "action" for "skill" and args inlined at top level. */
 export function parseAction(text: string, tier: Tier): ParseResult {
   const obj = extractJsonObject(text);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, error: 'no JSON object found' };
   const o = { ...(obj as Record<string, unknown>) };
   if (o.skill === undefined && typeof o.action === 'string') o.skill = o.action;
+  // Names small models invent for skills that exist under another name.
+  if (typeof o.skill === 'string') o.skill = SKILL_ALIASES[o.skill.trim().toLowerCase()] ?? o.skill;
   if (o.args === undefined) {
     const { thought: _t, skill: _s, action: _a, say: _say, learned: _l, forget: _f, ...rest } = o;
     o.args = rest;
@@ -40,6 +49,8 @@ export function parseAction(text: string, tier: Tier): ParseResult {
       args[k] = m[1]!.trim().toLowerCase().replace(/\s+/g, '_');
       if (m[2] && args.count === undefined && k !== 'target') args.count = Number(m[2]);
     }
+    // explore "down"/"up"/"around": not a compass direction; let the skill pick one.
+    if (typeof args.direction === 'string' && !/^(north|south|east|west|northeast|northwest|southeast|southwest)$/.test(args.direction.toLowerCase())) delete args.direction;
     // "gather 65 cobblestone" was rejected outright (max 64): cap it instead.
     if (typeof args.count === 'number' && args.count > 64) args.count = 64;
     o.args = args;

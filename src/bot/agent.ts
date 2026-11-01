@@ -30,6 +30,8 @@ import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
 import { LESSON_CAP, Memory } from './memory.js';
 import { Village } from './village.js';
 import { scanRoom } from '../skills/roomPlan.js';
+import { readBookItem } from '../skills/bookText.js';
+import { relevantKnowledge } from './knowledge.js';
 import { buildObservation, fitObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
@@ -114,6 +116,8 @@ const FACE_OFFSETS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [
 
 /** Blocks the unstuck routine must never break (homes, utility, other bots' work). */
 /** Skills that build or repair the home on purpose and may dig there (hollowing, doorways, crops). */
+/** Skills a bot may run while dug in for the night (none of them walk away). */
+const BUNKER_SAFE_SKILLS = new Set(['say', 'read_book', 'read_signs', 'write_book', 'remember', 'set_goal', 'eat', 'wait', 'check_temperature']);
 const HOME_BUILD_SKILLS = new Set(['build_shelter', 'extend_shelter', 'add_door', 'place_bed', 'farm']);
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
 
@@ -200,6 +204,8 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  /** When the bot last joined (its first position is the world spawn until the server moves it). */
+  private spawnedAt = 0;
   /** Steps of the last direct order still to run; when all succeeded the standing order is done. */
   private orderSteps: { left: number; failed: boolean } | undefined;
   /** Bumped by every direct order (a plan the model made meanwhile is dropped). */
@@ -277,6 +283,7 @@ export class BotAgent {
     bot.loadPlugin(pvpPlugin);
 
     bot.once('spawn', () => {
+      this.spawnedAt = Date.now();
       const moves = new Movements(bot);
       moves.canDig = true;
       moves.allowParkour = false; // fewer fatal falls
@@ -464,6 +471,25 @@ export class BotAgent {
 
   private log(level: 'info' | 'warn' | 'debug' | 'error', msg: string): void {
     log(level, this.name, msg);
+  }
+
+  /** Everything the bot knows in writing: books it carries, signs nearby, lessons, notes. */
+  private knowledgeSources(): Array<{ from: string; text: string }> {
+    const out: Array<{ from: string; text: string }> = [];
+    const bot = this.bot;
+    if (bot?.entity) {
+      for (const i of bot.inventory.items().filter((x) => x.name === 'written_book')) {
+        const c = readBookItem(i as unknown as Parameters<typeof readBookItem>[0]);
+        if (c) out.push({ from: `your book "${c.title ?? 'untitled'}"`, text: c.pages.join(' ') });
+      }
+      for (const p of bot.findBlocks({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 16, count: 6 })) {
+        const t = ((bot.blockAt(p) as unknown as { getSignText?: () => string[] } | null)?.getSignText?.() ?? []).join(' ');
+        if (t.trim()) out.push({ from: `the sign at ${p.x},${p.y},${p.z}`, text: t });
+      }
+    }
+    for (const l of this.memory.data.lessons ?? []) out.push({ from: 'your lessons', text: l });
+    for (const n of this.memory.data.notes) out.push({ from: 'your notes', text: n });
+    return out;
   }
 
   /** The queued steps that come from a player's direct order (they survive re-planning). */
@@ -785,7 +811,12 @@ export class BotAgent {
     // React now: stop the current action and re-plan with the message in view.
     this.planQueue = [];
     this.replyTo = from;
-    this.planNote = `${from} sent you a PRIVATE message: "${msg.slice(0, 160)}". Answer THAT message directly in "say" (it is sent privately to ${from}); if it is an instruction, follow it; if it teaches you something, also write it in "learned"`;
+    this.orderSeq++; // a plan the model is making right now did not see this message: drop it
+    const known = relevantKnowledge(msg, this.knowledgeSources());
+    this.planNote =
+      `${from} sent you a PRIVATE message: "${msg.slice(0, 160)}". Answer THAT message directly in "say" (it is sent privately to ${from}); if it is an instruction, follow it; if it teaches you something, also write it in "learned"` +
+      (known.length ? `. WHAT YOU ALREADY KNOW about this (answer FROM it, not from a guess): ${known.join(' | ')}` : '');
+    if (known.length) this.jsonl.write('knowledge_hint', { question: msg, known });
     if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
       this.interruptedBy = `message from ${from}`;
       this.skillAbort.abort();
@@ -1321,8 +1352,16 @@ export class BotAgent {
   private async plannerLoop(): Promise<void> {
     const minInterval = this.deps.config.bot.plannerMinIntervalSeconds * 1000;
     while (this.running) {
+      // Flagged as bunkered but not actually in the hole (fell out, dug beside itself, was moved): forget the
+      // bunker so the night reflex can act again (it stood outside all night "bunkered" with 1 health).
+      if (this.bunker && this.bot?.entity && Date.now() - this.spawnedAt > 10_000 && this.bot.entity.position.distanceTo(this.bunker.offset(0.5, 0, 0.5)) > 2.5) {
+        this.log('info', `not in my bunker at ${fmtPos(this.bunker)} any more (at ${fmtPos(this.bot.entity.position)}): forgetting it`);
+        this.bunker = undefined;
+        delete this.memory.data.places.bunker;
+      }
       const inBunkerAtNight = !!this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000;
-      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || (inBunkerAtNight && !this.forcedStep)) {
+      // In the bunker at night the bot only thinks when spoken to (answer, read, write - nothing that leaves).
+      if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || (inBunkerAtNight && !this.forcedStep && !this.replyTo)) {
         await sleep(250);
         continue;
       }
@@ -1341,10 +1380,12 @@ export class BotAgent {
           const steps = await this.plan();
           // A player's order arrived while the model was thinking: its steps win, drop this plan.
           if (this.orderSeq !== seq) continue;
-          // Dug in for the night while the model was thinking: that plan is for outside, drop it.
+          // Dug in for the night: only steps that don't leave the hole (talking, reading, writing).
           if (this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000) {
-            this.planQueue = [];
-            continue;
+            const safe = steps.filter((x) => BUNKER_SAFE_SKILLS.has(x.skill));
+            this.planQueue = safe.slice(1);
+            if (!safe[0]) continue;
+            steps.splice(0, steps.length, ...safe);
           }
           action = steps[0]!;
           this.planQueue = steps.slice(1);
@@ -1367,6 +1408,7 @@ export class BotAgent {
 
   private async plan(): Promise<PlannedAction[]> {
     const bot = this.bot!;
+    const replyFor = this.replyTo; // the private message this plan can see (and so may answer)
     const { provider, tier } = this.deps.llm.forTier(this.tier);
     const obs = buildObservation({
       bot,
@@ -1411,10 +1453,11 @@ export class BotAgent {
       });
       if (parsed.ok) {
         this.lastThought = parsed.thought || parsed.steps[0]?.thought || '';
-        const plan = parsed.steps.map((x) => x.skill).join(' -> ');
-        this.memory.addThought(`${this.lastThought}${parsed.steps.length > 1 ? ` [plan: ${plan}]` : ` [${plan}]`}`);
-        const answeringTo = this.replyTo;
-        this.replyTo = undefined;
+        this.memory.addThought(this.lastThought, parsed.steps.map((x) => x.skill).join(' -> '));
+        // Only a plan made AFTER the message arrived answers it (an older plan's "Heading to gather logs"
+        // was whispered back as the answer to "on what level are diamonds?").
+        const answeringTo = replyFor && this.replyTo === replyFor ? replyFor : undefined;
+        if (answeringTo) this.replyTo = undefined;
         // At most one model conclusion per 3 minutes (it drew one almost every turn), unless a player
         // just taught it something in a private message.
         const taught = Date.now() - this.lastWhisperAt < 120_000;

@@ -6,6 +6,7 @@ import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
 import { cleanLesson, LESSON_CAP, type Memory } from './memory.js';
 import type { Village } from './village.js';
 import { buildingContents, renderRoom, scanRoom } from '../skills/roomPlan.js';
+import { readBookItem } from '../skills/bookText.js';
 import { progressText } from './progress.js';
 
 export interface ObservationInput {
@@ -158,6 +159,28 @@ export function buildObservation(o: ObservationInput): string {
         `Buildings: ${bs.join('; ') || 'none yet'}.`,
     );
   }
+  // Written knowledge around: sign texts nearby and the books we carry (title + start), so the model can
+  // answer from them (it answered "diamonds at y=16-32" from its own guess with the right book in its bag).
+  const signs = bot
+    .findBlocks({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 16, count: 4 })
+    .map((p) => {
+      const b = bot.blockAt(p) as unknown as { getSignText?: () => string[] } | null;
+      const text = (b?.getSignText?.() ?? []).join(' ').replace(/\s+/g, ' ').trim();
+      return text ? `"${text.slice(0, 90)}" at ${p.x},${p.y},${p.z}` : '';
+    })
+    .filter(Boolean);
+  if (signs.length) lines.push(`Signs nearby: ${signs.join('; ')}.`);
+  const books = bot.inventory
+    .items()
+    .filter((i) => i.name === 'written_book')
+    .slice(0, 3)
+    .map((i) => {
+      const c = readBookItem(i as unknown as Parameters<typeof readBookItem>[0]);
+      const text = (c?.pages ?? []).join(' ').replace(/\s+/g, ' ').trim();
+      return c ? `"${c.title ?? 'untitled'}": ${text.slice(0, 140)}${text.length > 140 ? '... (read_book for all)' : ''}` : '';
+    })
+    .filter(Boolean);
+  if (books.length) lines.push(`Books you carry: ${books.join('; ')}.`);
   const room = scanRoom(bot, me.floored());
   if (room) lines.push(renderRoom(bot, room));
   const disc = [...(memory.data.discoveries ?? [])]
@@ -210,7 +233,7 @@ export function buildObservation(o: ObservationInput): string {
       const s = Math.max(0, Math.round((Date.now() - at) / 1000));
       return s < 90 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
     };
-    lines.push(`Your recent thinking (oldest first): ${thoughts.map((t) => `"${t.text}" (${ago(t.at)})`).join('; ')}.`);
+    lines.push(`Your recent thinking (oldest first): ${thoughts.map((t) => `${ago(t.at)}: "${t.text}"${t.plan ? ` -> did ${t.plan}` : ''}`).join('; ')}.`);
   }
   if (o.queued?.length) {
     lines.push(`Still planned: ${o.queued.map((q) => `${q.skill}${Object.keys(q.args).length ? ' ' + JSON.stringify(q.args) : ''}${q.thought.startsWith('order from') ? ' (order)' : ''}`).join(' -> ')}.`);

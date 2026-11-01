@@ -512,6 +512,16 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots never dig blocks within 4 blocks of their home (pathfinder `exclusionAreasBreak`), so they don't
   tunnel out of their own shelter.
+- **Trials** (`scripts/trial.mjs`): fresh full bots with the REAL model get materials and a plain-language
+  order on the test platform; results are checked on the server and the bot's decisions printed
+  (shelter_beds, chest_smelt, tools, village_second, book, sign). Run after behaviour changes; they found most
+  of the bugs listed in the git log of 2026-11-01.
+- **Questions are answered from written knowledge**: a private message gets the best matching snippets of
+  the bot's books, nearby signs, lessons and notes (`bot/knowledge.ts`) next to it; the observation also
+  shows nearby sign text and carried books. Only a plan made after the message may answer it.
+- **Bunker**: the bot centres on the cell before digging and must end up in the hole; a "bunkered" bot
+  more than 2.5 blocks from its bunker forgets it. While dug in it still answers messages (only
+  `BUNKER_SAFE_SKILLS` run). The model sees its last 3 thoughts and what is still planned.
 - **One village** (`bot/village.ts`, `state/village.json`, shared by all agents): founded by the first
   shelter (or seeded from a bot's remembered village/home). `build_shelter` walks to the village when
   farther than `VILLAGE_RADIUS` (40) and builds on a plot beside an existing building (2-block path between,

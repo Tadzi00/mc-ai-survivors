@@ -439,6 +439,11 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
     if (n.some((x) => x === 'water' || x === 'lava')) return { why: 'water or lava next to the hole' };
   }
   bot.pathfinder.stop();
+  // Stand in the middle of the cell: off-centre, the bot dug the hole next to its feet, never fell in,
+  // sealed an empty hole and stayed outside all night thinking it was safe.
+  await walkStraight(bot, top, 1500).catch(() => false);
+  bot.clearControlStates();
+  await sleep(150);
   for (const p of [d1, d2, d3]) {
     if (wet(bot.entity.position.floored()) || wet(bot.entity.position.floored().offset(0, 1, 0))) {
       return { why: 'water flowed in while digging; stopped' };
@@ -448,6 +453,10 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   }
   await sleep(500);
   const cover = findItem(bot, /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/);
+  const feetNow = bot.entity.position.floored();
+  if (feetNow.x !== d3.x || feetNow.z !== d3.z || feetNow.y > d3.y + 1) {
+    return { why: `dug a hole at ${fmtPos(d3)} but did not end up in it (standing at ${fmtPos(feetNow)})` };
+  }
   if (!cover) return { feet: d3, why: 'dug in but have no block to seal the top' };
   const ok = await placeItemAt(ctx, cover, d1);
   return { feet: d3, why: ok ? 'dug in and sealed the top' : 'dug in but could not seal the top' };
