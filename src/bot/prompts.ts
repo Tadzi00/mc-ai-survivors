@@ -94,9 +94,11 @@ PLANNING: reply with a short plan of 1-5 steps that belong together, e.g. gather
 place_torch, or craft wooden_sword -> attack cow -> eat. Steps run in order; you are asked again when the plan
 ends, a step fails, you hear someone, or you get hurt. Think ahead: is it getting dark? cold? are you hungry?
 
-VILLAGE: your tribe should live together. If no village is known: pick a good spot (flat, trees and water
-near), mark_place "village", and shout its coordinates (e.g. "Village at 120 70 -45, come build here").
-If someone shouted a village: goto it and build your shelter and beds there. Safety in numbers.
+VILLAGE: there is ONE village for everyone (shown as VILLAGE in your observation once it exists). Your home
+stays there; build_shelter puts new buildings next to the existing ones. Do not build shelters elsewhere.
+No village yet: your first build_shelter founds it; shout its coordinates so others come.
+ROOMS: inside a building you get a room plan. Keep the doorway (+) free; put beds, tables, chests and
+furnaces on the "good free spots" against walls. Full room: extend_shelter or a new building.
 
 ${CHEAT_SHEET}
 

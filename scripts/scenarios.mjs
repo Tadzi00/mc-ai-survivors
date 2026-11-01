@@ -7,6 +7,8 @@ import { sleepSkill, attackSkill, eatSkill } from '../dist/skills/impl/survival.
 import { farmSkill } from '../dist/skills/impl/farm.js';
 import { gotoSkill, goSurfaceSkill } from '../dist/skills/impl/movement.js';
 import { digBunker } from '../dist/skills/helpers.js';
+import { scanRoom, renderRoom } from '../dist/skills/roomPlan.js';
+import { placeBlockSkill } from '../dist/skills/impl/building.js';
 import { chestStoreSkill, chestTakeSkill } from '../dist/skills/impl/storage.js';
 
 const count = async (P, item) => Number(/Found (\d+)/.exec(await P.cmd(`clear ${P.botName} minecraft:${item} 0`))?.[1] ?? 0);
@@ -176,6 +178,59 @@ export const scenarios = {
     }
     const beef = await count(P, 'beef');
     return ok(beef > 0 && holes === 0, `attack: ${r} | beef=${beef} holes=${holes}`);
+  },
+
+  async room_plan(ctx, P) {
+    await room(P);
+    await P.cmd(`setblock ${P.X - 1} ${P.Y} ${P.Z - 1} minecraft:chest`);
+    // RCON blocks don't update the client's light data: go away and come back so the chunk is resent.
+    await P.cmd(`tp ${P.botName} ${P.X + 400} ${P.Y + 50} ${P.Z}`);
+    await P.sleep(2500);
+    await P.cmd(`tp ${P.botName} ${P.X + 0.5} ${P.Y} ${P.Z + 0.5}`);
+    await P.sleep(2500);
+    const r = scanRoom(ctx.bot, ctx.bot.entity.position.floored());
+    const plan = r ? renderRoom(ctx.bot, r) : 'no room';
+    ctx.log(plan);
+    const okPlan = !!r && r.cells.length === 9 && r.doors.length === 1 && /D/.test(plan) && /\+/.test(plan) && /@/.test(plan) && /C/.test(plan);
+    return ok(okPlan, `cells=${r?.cells.length} doors=${r?.doors.length}\n${plan}`);
+  },
+
+  // Bot stands right inside the door; a crafting table must not end up in the doorway.
+  async table_not_in_doorway(ctx, P) {
+    await room(P);
+    await P.cmd(`tp ${P.botName} ${P.X + 0.5} ${P.Y} ${P.Z + 1.5}`);
+    await P.give('crafting_table', 1);
+    await P.sleep(1200);
+    const r = await placeBlockSkill(ctx, { block: 'crafting_table' });
+    const inDoorway = await isBlock(P, P.X, P.Y, P.Z + 1, 'minecraft:crafting_table');
+    return ok(/placed/.test(r) && !inDoorway, `${r} | in doorway=${inDoorway}`);
+  },
+
+  async bed_not_in_doorway(ctx, P) {
+    await room(P);
+    await P.cmd(`tp ${P.botName} ${P.X + 0.5} ${P.Y} ${P.Z + 1.5}`);
+    await P.give('white_bed', 1);
+    await P.sleep(1200);
+    const r = await placeBedSkill(ctx);
+    const inDoorway = await isBlock(P, P.X, P.Y, P.Z + 1, '#minecraft:beds');
+    const placed = /placed/.test(r);
+    return ok(placed && !inDoorway, `${r} | in doorway=${inDoorway}`);
+  },
+
+  // A village with one building: the next shelter goes beside it (path between), even if the bot stands elsewhere.
+  async village_build(ctx, P) {
+    const { X, Y, Z } = P;
+    await room(P);
+    ctx.village.addBuilding({ x0: X - 2, z0: Z - 2, x1: X + 2, z1: Z + 2, y0: Y, door: { x: X, y: Y, z: Z + 2 }, owner: 'Other' });
+    await P.cmd(`tp ${P.botName} ${X - 9.5} ${Y} ${Z + 9.5}`);
+    await P.give('cobblestone', 128);
+    await P.give('oak_planks', 12);
+    await P.sleep(1500);
+    const r = await buildShelterSkill(ctx, { size: 5 });
+    const b = ctx.village.data.buildings;
+    const nb = b[1];
+    const beside = !!nb && (nb.x0 === X + 5 || nb.x1 === X - 5 || nb.z0 === Z + 5 || nb.z1 === Z - 5);
+    return ok(b.length === 2 && beside, `${r.slice(0, 140)} | buildings=${JSON.stringify(b.map((x) => [x.x0, x.z0, x.x1, x.z1]))}`);
   },
 
   async door_in(ctx, P) {

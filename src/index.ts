@@ -5,6 +5,7 @@ import { LLMRegistry } from './llm/factory.js';
 import { RconClient } from './rcon/rcon.js';
 import { BridgeApi, SeasonsApi } from './rcon/server.js';
 import { log } from './util/log.js';
+import { Village } from './bot/village.js';
 import { HomeRegistry, ProtectedAreas, Roster } from './bot/chat.js';
 
 async function main(): Promise<void> {
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
   setInterval(refreshAreas, 60_000);
 
   const state = new OrchestratorState(config.paths.state);
-  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster(), rcon, protectedAreas, homes: new HomeRegistry() });
+  const manager = new LifecycleManager(config, state, bridge, { config, llm, seasons, roster: new Roster(), rcon, protectedAreas, homes: new HomeRegistry(), village: new Village(config.paths.state) });
   manager.start();
   log('info', 'main', `orchestrator running: max ${config.population.maxBots} bots, ${config.population.smartSlots} smart slots`);
 

@@ -16,6 +16,7 @@ import { MAN_MADE_RE, ManMadeIndex, enableDoorPathing } from '../dist/skills/hel
 import { doorDigPenalty } from '../dist/bot/doors.js';
 import { enableServerCrafting } from '../dist/skills/impl/resources.js';
 import { scenarios } from './scenarios.mjs';
+import { Village } from '../dist/bot/village.js';
 import { rmSync } from 'node:fs';
 
 const config = loadConfig();
@@ -111,6 +112,8 @@ async function runScenario(name, sc) {
     bot, name: botName, tier: 'smart', memory, seasons: new SeasonsApi(rcon), config,
     signal: new AbortController().signal, log: (m) => logs.push(m),
   };
+  rmSync('./state/test/village.json', { force: true });
+  ctx.village = new Village('./state/test');
   const P = { X, Y, Z, cmd, sleep, give: (item, n = 1) => cmd(`give ${botName} minecraft:${item} ${n}`), botName };
   let result;
   try {

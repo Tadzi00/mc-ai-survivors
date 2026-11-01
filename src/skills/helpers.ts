@@ -5,6 +5,7 @@ import pathfinderPkg from 'mineflayer-pathfinder';
 import vec3 from 'vec3';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../util/time.js';
 import type { SkillContext } from './context.js';
+import { freeFloor, isKeepClear, scanRoom } from './roomPlan.js';
 
 const { goals } = pathfinderPkg;
 export type Vec3 = InstanceType<typeof vec3.Vec3>;
@@ -214,11 +215,17 @@ export async function placeItemAt(ctx: SkillContext, item: Item, pos: Vec3): Pro
 /** An air position adjacent to the bot with a solid block below (for torches, chests...). */
 export function freeSpotNearBot(bot: Bot): Vec3 | undefined {
   const base = bot.entity.position.floored();
+  // Inside a room: a free floor spot against a wall, never the doorway (a table there blocked the door).
+  const room = scanRoom(bot, base);
+  if (room) {
+    const spot = freeFloor(bot, room).find((c) => c.distanceTo(base) <= 4 && isSolid(bot.blockAt(c.offset(0, -1, 0))));
+    if (spot) return spot;
+  }
   const offs = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(1, 0, 1), v3(-1, 0, -1), v3(1, 0, -1), v3(-1, 0, 1), v3(2, 0, 0), v3(0, 0, 2)];
   for (const dy of [0, 1, -1]) {
     for (const o of offs) {
       const p = base.plus(o).offset(0, dy, 0);
-      if (isAirLike(bot.blockAt(p)) && isSolid(bot.blockAt(p.offset(0, -1, 0)))) return p;
+      if (isAirLike(bot.blockAt(p)) && isSolid(bot.blockAt(p.offset(0, -1, 0))) && !isKeepClear(bot, p)) return p;
     }
   }
   return undefined;

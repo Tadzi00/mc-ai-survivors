@@ -4,6 +4,8 @@ import type { Tier } from '../lifecycle/policy.js';
 import { findBlocks, fmtPos, HOSTILE_MOBS, isUnderground } from '../skills/helpers.js';
 import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
 import { cleanLesson, LESSON_CAP, type Memory } from './memory.js';
+import type { Village } from './village.js';
+import { buildingContents, renderRoom, scanRoom } from '../skills/roomPlan.js';
 import { progressText } from './progress.js';
 
 export interface ObservationInput {
@@ -29,6 +31,8 @@ export interface ObservationInput {
   helpActive?: boolean;
   /** Seconds since this bot last said/shouted anything. */
   silentSeconds?: number;
+  /** The shared village (buildings overview). */
+  village?: Village;
 }
 
 const CATEGORIES: Array<[string, (n: string) => boolean]> = [
@@ -136,6 +140,24 @@ export function buildObservation(o: ObservationInput): string {
       return `chest ${c.x},${c.y},${c.z} (${Math.round(d)}m): ${items}${c.by !== 'me' ? ` [per ${c.by}]` : ''}`;
     });
   if (chests.length) lines.push(`Storage you know: ${chests.join('; ')}.`);
+  // The village and its buildings (what is in each), then the plan of the room we stand in.
+  const v = o.village;
+  if (v?.center) {
+    const bs = v.data.buildings
+      .map((b) => ({ b, d: Math.hypot((b.x0 + b.x1) / 2 - me.x, (b.z0 + b.z1) / 2 - me.z) }))
+      .sort((p, q) => p.d - q.d)
+      .slice(0, 5)
+      .map(({ b, d }) => {
+        const inside = buildingContents(bot, b);
+        return `${b.owner}'s ${b.x0},${b.z0}..${b.x1},${b.z1}${b.door ? ` door ${fmtPos(b.door)}` : ''} (${Math.round(d)}m)${inside ? `: ${inside}` : ''}`;
+      });
+    lines.push(
+      `VILLAGE at ${fmtPos(v.center)} (${Math.round(distance(me, v.center))}m): all homes and new buildings go here (build_shelter builds next to the others). ` +
+        `Buildings: ${bs.join('; ') || 'none yet'}.`,
+    );
+  }
+  const room = scanRoom(bot, me.floored());
+  if (room) lines.push(renderRoom(bot, room));
   const disc = [...(memory.data.discoveries ?? [])]
     .map((d) => ({ d, dist: distance(me, d) }))
     .sort((a, b) => a.dist - b.dist)

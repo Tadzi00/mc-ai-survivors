@@ -28,6 +28,8 @@ import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
 import { LESSON_CAP, Memory } from './memory.js';
+import { Village } from './village.js';
+import { scanRoom } from '../skills/roomPlan.js';
 import { buildObservation, fitObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
@@ -46,6 +48,8 @@ export interface AgentDeps {
   protectedAreas?: ProtectedAreas;
   /** All bots' homes. */
   homes?: HomeRegistry;
+  /** The one shared village. */
+  village?: Village;
 }
 
 export interface AgentEvents {
@@ -163,6 +167,29 @@ export class BotAgent {
   /** A player whose private message we're answering: the next "say" is whispered back to them. */
   private replyTo: string | undefined;
   /** A player's instruction that stays at the top of the observation for a while. */
+  /**
+   * Keeps the shared village in sync: founded at the remembered village/home if nobody founded it yet, and
+   * a home the bot stands in (also one a player built) is added as a village building from its room plan.
+   */
+  private villageTick(): void {
+    const v = this.deps.village;
+    const bot = this.bot;
+    if (!v || !bot?.entity) return;
+    const home = this.memory.place('home');
+    if (!v.center) {
+      const seed = this.memory.place('village') ?? home;
+      if (seed) v.found(seed, this.name);
+    }
+    if (v.center && !this.memory.place('village')) this.memory.setPlace('village', { ...v.center, note: 'the village' });
+    if (!home || v.buildingAt(home)) return;
+    const me = bot.entity.position.floored();
+    if (Math.hypot(me.x - home.x, me.z - home.z) > 6) return;
+    const room = scanRoom(bot, me);
+    if (!room || !room.cells.some((c) => Math.abs(c.x - home.x) <= 1 && Math.abs(c.z - home.z) <= 1)) return;
+    v.addBuilding({ x0: room.x0 - 1, z0: room.z0 - 1, x1: room.x1 + 1, z1: room.z1 + 1, y0: room.y, door: room.doors[0], owner: this.name });
+    this.log('info', `village: added my home room ${room.x0 - 1},${room.z0 - 1}..${room.x1 + 1},${room.z1 + 1}`);
+  }
+
   /** Player's standing order; persisted in memory so a restart doesn't forget it. */
   private get order(): { from: string; text: string; until: number } | undefined {
     return this.memory.data.order;
@@ -314,6 +341,7 @@ export class BotAgent {
       bot.pathfinder.thinkTimeout = 10_000; // default 5 s gave up too early in dense terrain
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = 40; // impossible targets fail fast (not in the typings)
       this.manMade.refresh(bot);
+      this.timers.push(setInterval(() => this.villageTick(), 15_000));
       this.timers.push(setInterval(() => {
         if (this.bot?.entity) this.manMade.refresh(this.bot);
         this.refusedDigs.clear();
@@ -454,6 +482,7 @@ export class BotAgent {
       log: (m) => this.log('debug', m),
       protectedAreas: this.deps.protectedAreas,
       homes: this.deps.homes,
+      village: this.deps.village,
     };
   }
 
@@ -1223,6 +1252,7 @@ export class BotAgent {
         }
         if (r.feet) {
           this.bunker = r.feet;
+          this.planQueue = []; // the rest of a daytime plan would walk straight back out
           this.memory.setPlace('bunker', r.feet); // survives restarts (planner stays put until morning)
           this.memory.learn('At night in the open, dig 3 down and seal the top: zombies cannot reach you');
           this.jsonl.write('bunker', { pos: r.feet, result: r.why });
@@ -1274,6 +1304,11 @@ export class BotAgent {
         try {
           this.planningSince = Date.now();
           const steps = await this.plan();
+          // Dug in for the night while the model was thinking: that plan is for outside, drop it.
+          if (this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000) {
+            this.planQueue = [];
+            continue;
+          }
           action = steps[0]!;
           this.planQueue = steps.slice(1);
         } catch (e) {
@@ -1313,6 +1348,7 @@ export class BotAgent {
       chatRange: this.deps.config.chatRange,
       helpActive: !!this.helpCall,
       silentSeconds: (Date.now() - this.lastSpokeAt) / 1000,
+      village: this.deps.village,
     });
     this.interruptedBy = undefined;
     this.planNote = undefined;

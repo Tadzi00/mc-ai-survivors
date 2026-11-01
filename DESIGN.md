@@ -512,6 +512,17 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   and dug them out again right after. Bots walk around obstacles instead (less mobility, on purpose).
 - Bots never dig blocks within 4 blocks of their home (pathfinder `exclusionAreasBreak`), so they don't
   tunnel out of their own shelter.
+- **One village** (`bot/village.ts`, `state/village.json`, shared by all agents): founded by the first
+  shelter (or seeded from a bot's remembered village/home). `build_shelter` walks to the village when
+  farther than `VILLAGE_RADIUS` (40) and builds on a plot beside an existing building (2-block path between,
+  `plotsNextTo`). A new shelter only becomes "home" if the bot has none in the village; `set_home` refuses
+  spots outside the village when the current home is inside. A home room the bot stands in (also a
+  player-built one) is added as a building (`villageTick`, from the room scan).
+- **Room plans** (`skills/roomPlan.ts`): a floor-level flood fill from the bot's feet (doors are boundaries,
+  furniture is inside, a cell under open sky = outdoors). The observation shows an ASCII top view (# wall,
+  D door, + doorway, B/T/C/F/t furniture) and the best free spots (against walls, not the doorway). Every
+  placement (free spots, place_block, place_bed) refuses the doorway (`isKeepClear`: a door in the cell or
+  one of its 4 neighbours).
 - **One Movements for everything**: mineflayer-pvp and mineflayer-collectblock each create their own default
   `Movements` and call `setMovements` on every attack/gather (dig anywhere, scaffold, no doors, no home
   rules); later gotos kept using them. The agent sets `bot.pvp.movements` and `bot.collectBlock.movements` to

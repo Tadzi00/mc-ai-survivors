@@ -228,3 +228,29 @@ describe('chest item names', () => {
     expect(resolveInChest('coal', [{ name: 'coal', count: 3 }, { name: 'charcoal', count: 9 }])).toBe('coal');
   });
 });
+
+import { plotsNextTo, buildingAt } from '../src/bot/village.js';
+describe('village plots', () => {
+  const b = { x0: 0, z0: 0, x1: 4, z1: 4, y0: 64, owner: 'A', at: '' };
+  it('suggests plots beside a building with a path between, nearest the centre first', () => {
+    const plots = plotsNextTo([b], 5, { x: 2, y: 64, z: 2 });
+    expect(plots).toHaveLength(4);
+    // east plot: new x0 = 4 + 2 + 1 = 7 -> centre 9
+    expect(plots.some((p) => p.x === 9 && p.z === 2)).toBe(true);
+    expect(plots.some((p) => p.x === -5 && p.z === 2)).toBe(true);
+  });
+  it('skips plots that overlap another building', () => {
+    const east = { x0: 7, z0: 0, x1: 11, z1: 4, y0: 64, owner: 'B', at: '' };
+    const plots = plotsNextTo([b, east], 5, { x: 2, y: 64, z: 2 });
+    for (const p of plots) {
+      for (const o of [b, east]) {
+        const nx0 = p.x - 2, nx1 = p.x + 2, nz0 = p.z - 2, nz1 = p.z + 2;
+        expect(nx0 <= o.x1 && nx1 >= o.x0 && nz0 <= o.z1 && nz1 >= o.z0).toBe(false);
+      }
+    }
+  });
+  it('finds the building a point is in', () => {
+    expect(buildingAt([b], { x: 2, y: 64, z: 3 })?.owner).toBe('A');
+    expect(buildingAt([b], { x: 9, y: 64, z: 3 })).toBeUndefined();
+  });
+});

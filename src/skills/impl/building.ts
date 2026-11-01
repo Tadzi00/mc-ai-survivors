@@ -6,6 +6,8 @@ import type { SkillContext } from '../context.js';
 import {
   BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, nearestStandable, placeItemAt, v3, type Vec3,
 } from '../helpers.js';
+import { isKeepClear, wallsAround } from '../roomPlan.js';
+import { plotsNextTo, VILLAGE_RADIUS } from '../../bot/village.js';
 import { craftSkill } from './resources.js';
 
 export async function placeBlockSkill(ctx: SkillContext, a: SkillArgsOf<'place_block'>): Promise<string> {
@@ -14,6 +16,9 @@ export async function placeBlockSkill(ctx: SkillContext, a: SkillArgsOf<'place_b
   if (!item) return `no ${a.block} in inventory`;
   const pos = a.x !== undefined && a.y !== undefined && a.z !== undefined ? v3(Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)) : freeSpotNearBot(bot);
   if (!pos) return 'no free spot nearby';
+  if (!/_door$|torch|lantern/.test(item.name) && isKeepClear(bot, pos)) {
+    return `not placing ${item.name} at ${fmtPos(pos)}: that is the doorway (keep it clear); use a free spot from the room plan`;
+  }
   const ok = await placeItemAt(ctx, item, pos);
   return ok ? `placed ${item.name} at ${fmtPos(pos)}` : `could not place ${item.name} at ${fmtPos(pos)}`;
 }
@@ -53,9 +58,39 @@ function pickBuildingItem(ctx: SkillContext): Item | undefined {
  */
 /** Builds a shelter here, or, if this spot is unsuitable (built stuff / solid hill), at up to 4 spots ~7 blocks away. */
 export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build_shelter'>): Promise<string> {
+  const village = ctx.village;
+  const { bot } = ctx;
+  // One village: once it exists, every new building goes there, next to the others (with a path between).
+  if (village?.center) {
+    const c = village.center;
+    if (Math.hypot(bot.entity.position.x - c.x, bot.entity.position.z - c.z) > VILLAGE_RADIUS) {
+      await gotoNear(ctx, c.x, c.y, c.z, 3, 120_000).catch(() => undefined);
+      if (Math.hypot(bot.entity.position.x - c.x, bot.entity.position.z - c.z) > VILLAGE_RADIUS) {
+        return `build in the village at ${fmtPos(c)}, not out here: goto {"place":"village"} first (could not get there now)`;
+      }
+    }
+    const plots = plotsNextTo(village.data.buildings, a.size, c);
+    const tried: string[] = [];
+    for (const plot of plots.slice(0, 6)) {
+      throwIfAborted(ctx.signal);
+      const target = nearestStandable(bot, v3(plot.x, plot.y, plot.z), 2);
+      if (!target) continue;
+      try {
+        await gotoNear(ctx, target.x, target.y, target.z, 0, 30_000);
+      } catch {
+        continue;
+      }
+      if (bot.entity.position.floored().distanceTo(target) > 1.5) continue;
+      const r = await buildShelterHere(ctx, a);
+      if (!/^(too enclosed|something built is in the way)/.test(r)) return `${r} (village plot next to the other buildings)`;
+      tried.push(r.split(';')[0]!);
+    }
+    if (village.data.buildings.length > 0) {
+      return `no free plot next to the village buildings (${tried.length} tried${tried[0] ? `: ${tried[0]}` : ''}); clear flat ground beside them or extend_shelter`;
+    }
+  }
   const first = await buildShelterHere(ctx, a);
   if (!/^(too enclosed|something built is in the way)/.test(first)) return first;
-  const { bot } = ctx;
   const start = bot.entity.position.floored();
   const step = a.size + 2;
   for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]] as const) {
@@ -202,7 +237,13 @@ async function buildShelterHere(ctx: SkillContext, a: SkillArgsOf<'build_shelter
     await gotoNear(ctx, origin.x, origin.y, origin.z, 0, 8_000).catch(() => undefined);
     torchMsg = await heatRoomSkill(ctx, 4);
   }
-  ctx.memory.setPlace('home', origin);
+  // Home: the first shelter becomes home; later ones are extra rooms of the village (the home stays put,
+  // bots kept "forgetting" their home by building a new one somewhere and moving there).
+  const oldHome = ctx.memory.place('home');
+  const keepOld = !!oldHome && (!ctx.village || ctx.village.contains(oldHome));
+  if (!keepOld) ctx.memory.setPlace('home', origin);
+  ctx.village?.addBuilding({ x0, z0, x1, z1, y0, door: doorOk ? { x: doorX, y: y0, z: doorZ } : undefined, owner: ctx.name });
+  if (!ctx.memory.place('village') && ctx.village?.center) ctx.memory.setPlace('village', ctx.village.center);
   (ctx.memory.data.shelters ??= []).push({ x0, z0, x1, z1, y0 });
   ctx.memory.save();
   ctx.memory.addNote(
@@ -335,7 +376,10 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
           const head = foot.plus(d);
           const stand = foot.minus(d);
           if (!free(foot) || !free(head) || !isStandable(bot, stand)) continue;
-          options.push({ foot, head, stand, d, cost: stand.distanceTo(base) + (dy !== 0 ? 3 : 0) });
+          if (isKeepClear(bot, foot) || isKeepClear(bot, head)) continue; // never in the doorway
+          // against walls is better than across the middle of the room
+          const walls = wallsAround(bot, foot) + wallsAround(bot, head);
+          options.push({ foot, head, stand, d, cost: stand.distanceTo(base) + (dy !== 0 ? 3 : 0) - walls * 0.7 });
         }
       }
     }

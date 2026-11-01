@@ -76,6 +76,10 @@ export async function setHomeSkill(ctx: SkillContext): Promise<string> {
   if (cur?.note?.startsWith('set by ') && cur.note !== 'set by me' && Math.hypot(cur.x - p.x, cur.z - p.z) > 6) {
     return `kept your home at ${fmtPos(cur)} (${cur.note}); go there with goto {"place":"home"}`;
   }
+  // Homes stay in the one village.
+  if (cur && ctx.village?.center && !ctx.village.contains(p) && ctx.village.contains(cur)) {
+    return `kept your home at ${fmtPos(cur)}: it is in the village (${fmtPos(ctx.village.center)}) and this spot is not; go home with goto {"place":"home"}`;
+  }
   let room = '';
   if (ctx.seasons.enabled) {
     const r = await ctx.seasons.room(p.x, p.y, p.z).catch(() => undefined);

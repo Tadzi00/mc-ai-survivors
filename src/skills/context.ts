@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { Memory } from '../bot/memory.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { Tier } from '../lifecycle/policy.js';
+import type { Village } from '../bot/village.js';
 
 export interface SkillContext {
   bot: Bot;
@@ -18,6 +19,8 @@ export interface SkillContext {
   protectedAreas?: { contains(p: { x: number; y: number; z: number }): boolean };
   /** All bots' homes (shared). */
   homes?: { all(): Array<{ x: number; y: number; z: number }> };
+  /** The one shared village (new shelters go next to its buildings). */
+  village?: Village;
 }
 
 export type SkillFn<A> = (ctx: SkillContext, args: A) => Promise<string>;
