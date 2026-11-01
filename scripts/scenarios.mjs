@@ -160,6 +160,24 @@ export const scenarios = {
     return ok(inside && holes === 0, `goto home: ${r} | at ${pos.x.toFixed(1)},${pos.z.toFixed(1)} | inside=${inside} holes=${holes}`);
   },
 
+  // Hunting from inside the house: the cow is outside behind the north wall, the door is in the south wall.
+  async hunt_from_home(ctx, P) {
+    await room(P);
+    ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
+    await P.cmd(`summon minecraft:cow ${P.X + 0.5} ${P.Y} ${P.Z - 6.5} {NoAI:1b}`);
+    await P.give('stone_sword', 1);
+    await P.sleep(1500);
+    const r = await attackSkill(ctx, { target: 'cow' });
+    let holes = 0;
+    for (let x = P.X - 2; x <= P.X + 2; x++) for (let y = P.Y; y <= P.Y + 3; y++) for (let z = P.Z - 2; z <= P.Z + 2; z++) {
+      const wall = x === P.X - 2 || x === P.X + 2 || z === P.Z - 2 || z === P.Z + 2 || y === P.Y + 3;
+      if (!wall || (x === P.X && z === P.Z + 2 && y <= P.Y + 1)) continue;
+      if (await isBlock(P, x, y, z, 'minecraft:air')) holes++;
+    }
+    const beef = await count(P, 'beef');
+    return ok(beef > 0 && holes === 0, `attack: ${r} | beef=${beef} holes=${holes}`);
+  },
+
   async door_in(ctx, P) {
     await room(P);
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });

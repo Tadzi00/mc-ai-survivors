@@ -270,7 +270,8 @@ export class BotAgent {
           this.refusedDigs.set(key, n);
           if (n === 1) {
             const from = (new Error().stack ?? '').split('\n').slice(2, 5).map((l) => l.trim().replace(/^at /, '').replace(/\(.*node_modules\//, '(')).join(' < ');
-            const planCheck = (moves as unknown as { exclusionBreak(b: unknown): number }).exclusionBreak(block);
+            const active = (bot.pathfinder as unknown as { movements: unknown }).movements;
+            const planCheck = `${(moves as unknown as { exclusionBreak(b: unknown): number }).exclusionBreak(block)}${active === moves ? '' : ' (pathfinder is using OTHER movements!)'} canDig=${(active as { canDig?: boolean })?.canDig} excl=${(active as { exclusionAreasBreak?: unknown[] })?.exclusionAreasBreak?.length}`;
             this.log('warn', `refused to dig ${block.name} at ${fmtPos(block.position)} (${why}) during ${this.currentSkill ?? 'reflex'}; path check said ${planCheck}: ${from}`);
             this.jsonl.write('dig_refused', { block: block.name, pos: block.position, why, planCheck, skill: this.currentSkill, from });
           }
