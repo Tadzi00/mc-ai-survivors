@@ -145,3 +145,16 @@ describe('chest knowledge', () => {
     expect(applyChestDelta({ cobblestone: 10, bread: 2 }, { cobblestone: 10, bread: 5 }, -1)).toEqual({});
   });
 });
+
+import { lessonSimilarity } from '../src/bot/memory.js';
+
+describe('lesson dedup by meaning', () => {
+  it('treats reworded conclusions as duplicates, keeps different ones', () => {
+    let l = addLesson([], 'Conclusion: Logs are essential for crafting, tools, and protection.');
+    l = addLesson(l, 'Conclusion: Logs are needed for crafting tools and protection');
+    expect(l).toHaveLength(1);
+    l = addLesson(l, 'Conclusion: cows live on grass under open sky, not in caves');
+    expect(l).toHaveLength(2);
+    expect(lessonSimilarity('iron ore needs a stone pickaxe', 'cows live on grass')).toBe(0);
+  });
+});

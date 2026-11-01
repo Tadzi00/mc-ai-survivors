@@ -75,11 +75,24 @@ export function addDiscovery(list: Discovery[], d: Discovery, mergeDist = 24, ca
   return out.length > cap ? out.slice(out.length - cap) : out;
 }
 
-/** Adds a lesson unless an equivalent one (same first 50 chars, case-insensitive) exists. PURE. */
+const STOP = new Set(['the', 'a', 'an', 'to', 'and', 'or', 'for', 'of', 'in', 'on', 'is', 'are', 'be', 'it', 'with', 'conclusion', 'from', 'my', 'i', 'you', 'more', 'need', 'needed', 'essential']);
+const words = (t: string): Set<string> =>
+  new Set(t.toLowerCase().replace(/^conclusion:\s*/, '').split(/[^a-z0-9_]+/).filter((w) => w.length > 2 && !STOP.has(w)));
+
+/** Word-overlap similarity (Jaccard) of two lessons, 0..1. PURE. */
+export function lessonSimilarity(a: string, b: string): number {
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+/** Adds a lesson unless an equivalent one exists (same start, or mostly the same words). PURE. */
 export function addLesson(list: string[], lesson: string, cap = 15): string[] {
   const l = lesson.trim().slice(0, 160);
   const key = l.toLowerCase().slice(0, 50);
-  if (!l || list.some((o) => o.toLowerCase().slice(0, 50) === key)) return list;
+  if (!l || list.some((o) => o.toLowerCase().slice(0, 50) === key || lessonSimilarity(o, l) >= 0.5)) return list;
   const out = [...list, l];
   return out.length > cap ? out.slice(out.length - cap) : out;
 }
