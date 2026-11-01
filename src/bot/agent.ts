@@ -1946,6 +1946,16 @@ export class BotAgent {
       // In the bunker at night the bot only thinks when spoken to (answer, read, write - nothing that leaves).
       // A newborn waits for its teacher (it only answers when spoken to).
       const waitingForTeacher = this.isApprentice() && !this.forcedStep && !this.replyTo;
+      // Night in the open: no outdoor plans (bots planned "gather logs" in the dark and were shot); the night
+      // reflexes (home / hole / hut) take care of it until morning. Only answering still happens.
+      const tod = this.bot?.time.timeOfDay ?? 0;
+      const darkOutside = this.deps.config.bot.nightShelter && tod >= 13_000 && tod <= 23_000 && !this.bunker && !!this.bot?.entity &&
+        (this.bot.blockAt(this.bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 0) >= 13 && !scanRoom(this.bot, this.bot.entity.position.floored());
+      if (darkOutside && !this.replyTo && !this.forcedStep?.thought.startsWith('order from')) {
+        this.planQueue = this.orderStepsOnly().filter((st) => BUNKER_SAFE_SKILLS.has(st.skill));
+        await sleep(1000);
+        continue;
+      }
       if (this.reflexBusy || Date.now() - this.lastPlanAt < minInterval || !this.bot?.entity || waitingForTeacher || (inBunkerAtNight && !this.forcedStep && !this.replyTo)) {
         await sleep(250);
         continue;
