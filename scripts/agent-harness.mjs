@@ -211,6 +211,21 @@ const scenarios = {
     return { ok, why: `village=${!!village} chest=${JSON.stringify(chest?.items)} trees=${trees} lesson=${lesson}` };
   },
 
+  /** A announces a chest deposit within earshot; B's chest memory updates from hearing it. */
+  async chest_report() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_rep', x: X, z: Z },
+      { name: 'TestB_rep', x: X + 4, z: Z },
+    ]);
+    await sleep(1500);
+    a.bot.chat(`Stored 15 cobblestone, 5 bread in the chest at ${X + 2} ${Y} ${Z}`);
+    await sleep(2000);
+    const c = Object.values(b.memory.data.storage ?? {})[0];
+    await stopAgents([a, b]);
+    const ok = c?.items?.cobblestone === 15 && c?.items?.bread === 5 && c?.by === 'TestA_rep';
+    return { ok, why: `B believes chest has ${JSON.stringify(c?.items)} (per ${c?.by})` };
+  },
+
   /** Player order via /tell: "build shelter" runs instantly without the model. */
   async order() {
     const [a] = await startAgents([{ name: 'TestA_order', x: X, z: Z }]);
