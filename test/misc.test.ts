@@ -177,6 +177,7 @@ describe('lesson hygiene', () => {
   it('strips copied labels', () => {
     expect(cleanLesson('- Conclusion: Split tasks')).toBe('Split tasks');
     expect(cleanLesson('Conclusion: - Conclusion: Hunt cows')).toBe('Hunt cows');
+    expect(cleanLesson('- [14] Gather wool first')).toBe('Gather wool first');
   });
   it('rejects to-dos, keeps facts', () => {
     expect(isLessonWorthy('Need to hunt a cow and craft a wooden pickaxe.')).toBe(false);

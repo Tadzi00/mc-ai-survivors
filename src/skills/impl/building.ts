@@ -229,19 +229,57 @@ async function placeDoor(ctx: SkillContext, doorway: Vec3, inside: Vec3): Promis
   }
   const floor = bot.blockAt(doorway.offset(0, -1, 0));
   if (!isSolid(floor)) return 'no solid floor under the doorway';
-  if (bot.entity.position.distanceTo(doorway) > 4) await gotoNear(ctx, inside.x, inside.y, inside.z, 1, 10_000).catch(() => undefined);
-  try {
-    await bot.equip(door, 'hand');
-    await bot.lookAt(doorway.offset(0.5, 0, 0.5), true);
-    await bot.placeBlock(floor!, v3(0, 1, 0));
-  } catch (e) {
-    ctx.log(
-      `door placement at ${fmtPos(doorway)}: ${(e as Error).message} | held=${bot.heldItem?.name} doors=${countItem(bot, /_door$/)} ` +
-        `me=${fmtPos(bot.entity.position)} floor=${floor?.name} cell=${bot.blockAt(doorway)?.name}/${bot.blockAt(doorway.offset(0, 1, 0))?.name}`,
-    );
+  // The door takes the direction the bot faces when placing (mineflayer turns to the floor block itself).
+  // Stand on the cell just inside the doorway, in line with it, so the door faces straight out of the wall.
+  const along = doorAxis(doorway, inside);
+  const sign = along === 'x' ? Math.sign(inside.x - doorway.x) || 1 : Math.sign(inside.z - doorway.z) || 1;
+  const stand = along === 'x' ? doorway.offset(sign, 0, 0) : doorway.offset(0, 0, sign);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await gotoXZExact(ctx, stand);
+    try {
+      await bot.equip(door, 'hand');
+      await bot.lookAt(doorway.offset(0.5, 0.5, 0.5), true);
+      await bot.placeBlock(floor!, v3(0, 1, 0));
+    } catch (e) {
+      ctx.log(
+        `door placement at ${fmtPos(doorway)}: ${(e as Error).message} | held=${bot.heldItem?.name} doors=${countItem(bot, /_door$/)} ` +
+          `me=${fmtPos(bot.entity.position)} floor=${floor?.name} cell=${bot.blockAt(doorway)?.name}/${bot.blockAt(doorway.offset(0, 1, 0))?.name}`,
+      );
+    }
+    await sleep(150);
+    const placed = bot.blockAt(doorway);
+    if (!placed || !/_door$/.test(placed.name)) return 'door placement failed';
+    const facing = String((placed.getProperties() as Record<string, unknown>).facing);
+    const facingAxis = facing === 'east' || facing === 'west' ? 'x' : 'z';
+    if (facingAxis === along) return 'ok';
+    // Sideways door (panel along the passage): pick it up and place it again.
+    ctx.log(`door at ${fmtPos(doorway)} faces ${facing}, passage runs along ${along}: replacing it`);
+    await bot.dig(placed, true).catch(() => undefined);
+    await pickUpNear(ctx, doorway);
   }
-  const placed = bot.blockAt(doorway);
-  return placed && /_door$/.test(placed.name) ? 'ok' : 'door placement failed';
+  return bot.blockAt(doorway) && /_door$/.test(bot.blockAt(doorway)!.name) ? 'ok' : 'door placement failed';
+}
+
+/** Axis a doorway passage runs along: the wall normal, i.e. the axis with the bigger offset to the inside. */
+function doorAxis(doorway: Vec3, inside: Vec3): 'x' | 'z' {
+  return Math.abs(inside.x - doorway.x) > Math.abs(inside.z - doorway.z) ? 'x' : 'z';
+}
+
+/** Walk onto the centre of block `p` (best effort, short). */
+async function gotoXZExact(ctx: SkillContext, p: Vec3): Promise<void> {
+  const { bot } = ctx;
+  if (bot.entity.position.floored().equals(p)) return;
+  await gotoNear(ctx, p.x, p.y, p.z, 0, 10_000).catch(() => undefined);
+}
+
+/** Collect dropped items lying within 3 blocks of `p`. */
+async function pickUpNear(ctx: SkillContext, p: Vec3): Promise<void> {
+  const { bot } = ctx;
+  await sleep(300);
+  for (const e of Object.values(bot.entities)) {
+    if (e.name !== 'item' || e.position.distanceTo(p) > 3) continue;
+    await gotoNear(ctx, e.position.x, e.position.y, e.position.z, 0, 4000).catch(() => undefined);
+  }
 }
 
 /** add_door skill: put a door into a walled-up or empty doorway of your shelter. */

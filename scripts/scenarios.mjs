@@ -14,12 +14,12 @@ const isBlock = async (P, x, y, z, block) => /passed/i.test(await P.cmd(`execute
 const ok = (cond, why) => ({ ok: !!cond, why });
 
 /** Hollow stone room 5x5 (outer) around (X,Y,Z), floor at Y-1, roof at Y+3, with an oak door on the south wall. */
-async function room(P, { door = true } = {}) {
+async function room(P, { door = true, facing = 'south' } = {}) {
   const { X, Y, Z } = P;
   await P.cmd(`fill ${X - 2} ${Y - 1} ${Z - 2} ${X + 2} ${Y + 3} ${Z + 2} minecraft:stone hollow`);
   if (door) {
-    await P.cmd(`setblock ${X} ${Y} ${Z + 2} minecraft:oak_door[half=lower,facing=south]`);
-    await P.cmd(`setblock ${X} ${Y + 1} ${Z + 2} minecraft:oak_door[half=upper,facing=south]`);
+    await P.cmd(`setblock ${X} ${Y} ${Z + 2} minecraft:oak_door[half=lower,facing=${facing}]`);
+    await P.cmd(`setblock ${X} ${Y + 1} ${Z + 2} minecraft:oak_door[half=upper,facing=${facing}]`);
   }
   // RCON fills fire no block events, so RealisticSeasons' 5 s "outside" cache must expire on its own.
   await P.sleep(6000);
@@ -115,6 +115,24 @@ export const scenarios = {
     return ok(pos.z > P.Z + 4 && doorStill && holes === 0, `goto: ${r} | at z=${pos.z.toFixed(1)} | door=${doorStill} holes=${holes}`);
   },
 
+  // A door placed sideways (facing east in a south wall) is walkable while closed; opening it blocks the way.
+  async door_sideways(ctx, P) {
+    await room(P, { facing: 'east' });
+    ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
+    const out = await gotoSkill(ctx, { x: P.X, y: P.Y, z: P.Z + 7 });
+    const outPos = ctx.bot.entity.position.clone();
+    const back = await gotoSkill(ctx, { place: 'home' });
+    const pos = ctx.bot.entity.position;
+    let holes = 0;
+    for (let x = P.X - 2; x <= P.X + 2; x++) for (let y = P.Y; y <= P.Y + 2; y++) for (const z of [P.Z - 2, P.Z + 2]) {
+      if (x === P.X && z === P.Z + 2 && y <= P.Y + 1) continue;
+      if (await isBlock(P, x, y, z, 'minecraft:air')) holes++;
+    }
+    const inside = Math.abs(pos.x - (P.X + 0.5)) < 2 && Math.abs(pos.z - (P.Z + 0.5)) < 2;
+    const door = await isBlock(P, P.X, P.Y, P.Z + 2, '#minecraft:doors');
+    return ok(outPos.z > P.Z + 4 && inside && holes === 0 && door, `out: ${out} (z=${outPos.z.toFixed(1)}) | back: ${back} | inside=${inside} holes=${holes} door=${door}`);
+  },
+
   async door_in(ctx, P) {
     await room(P);
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
@@ -161,9 +179,13 @@ export const scenarios = {
     ctx.memory.setPlace('doorway', { x: P.X, y: P.Y, z: P.Z + 2 });
     await P.give('oak_planks', 10); // 6 for the door + 4 for a crafting table
     await P.sleep(800);
+    // start off to the side, so a careless placement would face east/west
+    await P.cmd(`tp ${P.botName} ${P.X + 1.5} ${P.Y} ${P.Z + 0.5}`);
+    await P.sleep(800);
     const r = await addDoorSkill(ctx);
     const door = await isBlock(P, P.X, P.Y, P.Z + 2, '#minecraft:doors');
-    return ok(door, `add_door: ${r} | door=${door}`);
+    const facing = (await isBlock(P, P.X, P.Y, P.Z + 2, '#minecraft:doors[facing=north]')) || (await isBlock(P, P.X, P.Y, P.Z + 2, '#minecraft:doors[facing=south]'));
+    return ok(door && facing, `add_door: ${r} | door=${door} facing along passage=${facing}`);
   },
 
   async torch(ctx, P) {

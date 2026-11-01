@@ -516,8 +516,12 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   only knows fence gates, and its gate path stalls forever (the `placing` flag is never cleared after
   `useOne`). So doors were solid unbreakable blocks, no route went through a door, and bots dug a hole next
   to it. Now `canOpenDoors` is OFF on purpose; wooden doors (both halves, open or closed) are passable in
-  `getBlock`, a 150 ms timer opens a closed door on the next path nodes and closes doors the bot opened once
-  it is 2+ blocks past (heat). Iron doors stay solid. Digging within 10 blocks (±4 y) of a known door costs
+  `getBlock`, a 150 ms timer toggles a door on the next path nodes ONLY if its panel blocks the walking
+  direction (path step into the door, not the bot position: that cut corners and flapped the door), and
+  closes doors it opened once 2+ blocks past (heat). Open != passable: a door placed sideways (facing along
+  the wall) is walkable closed and blocks when opened. `transitHomeDoor` uses the same check
+  (`doorBlocksAxis`). `placeDoor` stands on the cell just inside the doorway (mineflayer turns to the floor
+  block, and the door takes the bot's facing) and re-places a door that came out sideways. Iron doors stay solid. Digging within 10 blocks (±4 y) of a known door costs
   +`DOOR_DIG_PENALTY` (12) per block on top of the normal dig cost (wrapped `safeOrBreak`, because the
   pathfinder only uses `exclusionAreasBreak` as an allowed/forbidden switch), so a route through a door
   wins unless the detour is ~12 blocks longer per block that would be dug. Scenario `door_detour`.

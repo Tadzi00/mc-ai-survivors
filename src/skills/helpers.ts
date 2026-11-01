@@ -316,14 +316,16 @@ export async function transitHomeDoor(ctx: SkillContext, target: { x: number; y:
   const [from, to] = meIn ? [inside, outside.plus(out)] : [outside, inside];
   try {
     await withTimeout(bot.pathfinder.goto(new goals.GoalBlock(from.x, from.y, from.z)), 15_000, 'door');
+    // Toggle the door only if its panel is in the way (a sideways door is passable closed), walk straight
+    // through by hand, then put it back the way it was.
+    const axis = out.x !== 0 ? 'x' : 'z';
     const now = bot.blockAt(d);
-    if (now && (now as unknown as { getProperties(): { open?: boolean } }).getProperties().open !== true) await bot.activateBlock(now);
+    const toggled = !!now && doorBlocksAxis(now, axis);
+    if (toggled) await bot.activateBlock(now!);
     await sleep(250);
-    // Walk straight through the open doorway by hand: the pathfinder's own door logic toggles (closes) a door
-    // that is already open and then gives up.
     await walkStraight(bot, to, 4_000);
     const after = bot.blockAt(d);
-    if (after && (after as unknown as { getProperties(): { open?: boolean } }).getProperties().open === true) await bot.activateBlock(after);
+    if (toggled && after && /_door$/.test(after.name)) await bot.activateBlock(after);
   } catch (e) {
     if (ctx.signal.aborted) throw new AbortError();
     ctx.log(`door transit via ${fmtPos(d)} failed: ${(e as Error).message}`); // fall back to normal pathfinding
@@ -469,6 +471,17 @@ export class ManMadeIndex {
 }
 
 /**
+ * Does this door's panel block walking along `axis`? The panel is a thin slab, thin along the axis it
+ * blocks. Open is not the same as passable: a door placed sideways is walkable while closed.
+ */
+export function doorBlocksAxis(b: Block, axis: 'x' | 'z'): boolean {
+  const box = b.shapes?.[0];
+  if (!box) return false; // no collision box: walk-through
+  const thinX = box[3] - box[0] < 0.5;
+  return axis === 'x' ? thinX : !thinX;
+}
+
+/**
  * Teach the pathfinder to use wooden doors. Its `canOpenDoors` only covers fence gates, and even that path
  * stalls (it never clears its "placing" flag after using the gate). So a door was a solid block it may not
  * break, routes through doors did not exist and the bot dug a hole beside the door instead.
@@ -507,18 +520,29 @@ export function enableDoorPathing(bot: Bot, moves: unknown): void {
   const timer = setInterval(() => {
     if (!bot.entity || busy) return;
     const me = bot.entity.position;
-    // open a closed door on the path just ahead
+    // Toggle a door on the path just ahead if its panel blocks the way we walk. A door's panel is a thin
+    // slab; "open" is not the same as "passable": a door placed sideways is walkable while CLOSED, and
+    // opening it would swing the panel across the doorway.
     if (path.length > 0 && bot.pathfinder.isMoving()) {
-      for (const n of path.slice(0, 4)) {
-        if (me.distanceTo(new vec3.Vec3(n.x + 0.5, n.y, n.z + 0.5)) > 2.6) continue;
+      const ahead = path.slice(0, 4);
+      for (const [i, n] of ahead.entries()) {
+        if (Math.hypot(n.x + 0.5 - me.x, n.y - me.y, n.z + 0.5 - me.z) > 2.6) continue;
+        // Walking direction through the door = the path step into it (or out of it if that one is diagonal);
+        // not the bot's position, which cuts corners and made the door flap open/shut.
+        const prev = i > 0 ? ahead[i - 1]! : { x: Math.floor(me.x), z: Math.floor(me.z) };
+        const next = path[i + 1];
+        let sx = n.x - prev.x, sz = n.z - prev.z;
+        if ((sx !== 0) === (sz !== 0) && next) { sx = next.x - n.x; sz = next.z - n.z; }
+        const dxw = Math.abs(sx), dzw = Math.abs(sz);
         for (const dy of [0, 1]) {
           const b = bot.blockAt(new vec3.Vec3(n.x, n.y + dy, n.z));
           if (!b || !doorIds.has(b.type)) continue;
-          const lower = dy === 1 || (b.getProperties() as Record<string, unknown>).half === 'upper' ? b.position.offset(0, -1, 0) : b.position;
-          if (isOpen(b)) break;
+          const lower = (b.getProperties() as Record<string, unknown>).half === 'upper' ? b.position.offset(0, -1, 0) : b.position;
+          if (!doorBlocksAxis(b, Math.abs(dxw) >= Math.abs(dzw) ? 'x' : 'z')) break;
+          const wasOpen = isOpen(b);
           busy = true;
           bot.activateBlock(b).then(
-            () => { opened.set(`${lower.x},${lower.y},${lower.z}`, lower); },
+            () => { if (!wasOpen) opened.set(`${lower.x},${lower.y},${lower.z}`, lower); },
             () => undefined,
           ).finally(() => { setTimeout(() => { busy = false; }, 300); });
           return;

@@ -101,7 +101,7 @@ const words = (t: string): Set<string> =>
 /** Strips list markers and (repeated) "Conclusion:" labels the model copies from its own prompt. PURE. */
 export function cleanLesson(t: string): string {
   let s = t.trim();
-  for (let i = 0; i < 4; i++) s = s.replace(/^\s*(?:[-*•]\s*|conclusion\s*:\s*)/i, '');
+  for (let i = 0; i < 4; i++) s = s.replace(/^\s*(?:[-*•]\s*|\[\d+\]\s*|conclusion\s*:\s*)/i, '');
   return s.trim();
 }
 
