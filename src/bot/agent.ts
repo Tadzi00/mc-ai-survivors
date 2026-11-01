@@ -177,10 +177,12 @@ export class BotAgent {
     if (!v || !bot?.entity) return;
     const home = this.memory.place('home');
     if (!v.center) {
-      const seed = this.memory.place('village') ?? home;
+      // The home (where beds and chests are) beats a spot the model once marked as "village".
+      const seed = home ?? this.memory.place('village');
       if (seed) v.found(seed, this.name);
     }
-    if (v.center && !this.memory.place('village')) this.memory.setPlace('village', { ...v.center, note: 'the village' });
+    const mine = this.memory.place('village');
+    if (v.center && (!mine || mine.x !== v.center.x || mine.z !== v.center.z)) this.memory.setPlace('village', { ...v.center, note: 'the village' });
     if (!home || v.buildingAt(home)) return;
     const me = bot.entity.position.floored();
     if (Math.hypot(me.x - home.x, me.z - home.z) > 6) return;
