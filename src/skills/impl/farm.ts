@@ -1,13 +1,15 @@
 import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, gotoNear, isAirLike, isEmptyCell, placeItemAt, v3, type Vec3 } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, gotoNear, isAirLike, isEmptyCell, isStandable, placeItemAt, v3, walkStraight, type Vec3 } from '../helpers.js';
 import { bestFieldSite } from '../fieldPlan.js';
-import { craftSkill } from './resources.js';
+import { craftSkill, gatherSkill } from './resources.js';
 
 /** Ground a hoe turns into farmland, and shore ground we replace with dirt first. */
 const TILLABLE = ['grass_block', 'dirt', 'dirt_path', 'coarse_dirt', 'rooted_dirt'];
 const SWAPPABLE = ['sand', 'gravel', 'podzol', 'red_sand', 'mycelium', 'clay'];
+/** Dug without silk touch these drop a dirt block: they swap themselves (no carried dirt needed). */
+const DROPS_DIRT = ['podzol', 'mycelium'];
 
 const CROPS = {
   wheat: { block: 'wheat', seed: 'wheat_seeds', maxAge: 7 },
@@ -34,11 +36,28 @@ export async function collectSeeds(ctx: SkillContext, n: number): Promise<number
   return have() - start;
 }
 
+/** Is there any farmland or wheat around the field's water block? (Only checkable when loaded.) */
+function fieldAlive(ctx: SkillContext, f: { x: number; y: number; z: number }): boolean {
+  const { bot } = ctx;
+  if (!bot.blockAt(v3(f.x, f.y, f.z))) return true; // not loaded: assume it is there
+  return findBlocks(bot, ['farmland', 'wheat'], 96, 200).some((b) => Math.abs(b.position.x - f.x) <= 5 && Math.abs(b.position.z - f.z) <= 5 && Math.abs(b.position.y - f.y) <= 2);
+}
+
+function forgetField(ctx: SkillContext): void {
+  if (ctx.village) {
+    delete ctx.village.data.field;
+    ctx.village.save();
+  }
+  delete ctx.memory.data.places.field;
+  ctx.memory.save();
+}
+
 /** Make (if needed) the village field next to water: hoe, seeds, till, plant. */
 async function setupField(ctx: SkillContext): Promise<string> {
   const { bot } = ctx;
   const known = ctx.village?.data.field ?? ctx.memory.place('field');
-  if (known) return `the village already has a field at ${fmtPos(known)} - use farm {"action":"tend"} there`;
+  if (known && fieldAlive(ctx, known)) return `the village already has a field at ${fmtPos(known)} - use farm {"action":"tend"} there`;
+  if (known) forgetField(ctx); // an empty "field" (setup failed earlier) blocked anyone from making a real one
   const center = ctx.village?.center ?? ctx.memory.place('home') ?? bot.entity.position.floored();
   if (bot.entity.position.distanceTo(v3(center.x, center.y, center.z)) > 24) await gotoNear(ctx, center.x, center.y, center.z, 3, 90_000).catch(() => undefined);
   const look = (): ReturnType<typeof bestFieldSite> => {
@@ -76,14 +95,28 @@ async function setupField(ctx: SkillContext): Promise<string> {
   const seeds = countItem(bot, 'wheat_seeds');
   if (seeds === 0) return 'no wheat seeds (break tall grass to find some) - nothing to plant yet';
   // till only as many as we can plant (bare farmland turns back into dirt)
-  // prefer real soil; swap shore blocks only while we carry dirt
-  const isSoil = (t: { x: number; y: number; z: number }): boolean => TILLABLE.includes(bot.blockAt(v3(t.x, t.y, t.z))?.name ?? '');
-  const ordered = [...site.tiles.filter(isSoil), ...site.tiles.filter((t) => !isSoil(t)).slice(0, countItem(bot, 'dirt'))];
-  const tiles = ordered.slice(0, Math.min(want, seeds));
+  // Real soil first. Podzol/mycelium drop dirt when dug (so they swap themselves); sand/gravel need dirt
+  // we carry - gather some first if short.
+  const nameAt = (t: { x: number; y: number; z: number }): string => bot.blockAt(v3(t.x, t.y, t.z))?.name ?? '';
+  const soilTiles = site.tiles.filter((t) => TILLABLE.includes(nameAt(t)));
+  const swapTiles = site.tiles.filter((t) => SWAPPABLE.includes(nameAt(t)));
+  const n = Math.min(want, seeds);
+  // Podzol/sand/gravel shores get a dirt block each: gather the dirt first if we are short.
+  const selfSwapping = swapTiles.filter((t) => DROPS_DIRT.includes(nameAt(t))).length;
+  const short = Math.max(0, Math.min(swapTiles.length - selfSwapping, n - soilTiles.length - selfSwapping) - countItem(bot, 'dirt'));
+  if (short > 0) ctx.log(`field: gathering dirt: ${await gatherSkill(ctx, { block: 'dirt', count: Math.min(short + 2, 24) }).catch((e: Error) => e.message)}`);
+  ctx.log(`field: ${site.tiles.length} tiles (${soilTiles.length} soil, ${swapTiles.length} to swap), dirt=${countItem(bot, 'dirt')}, seeds=${seeds}`);
+  // podzol/mycelium give their own dirt when dug, so they never need carried dirt
+  const self = swapTiles.filter((t) => DROPS_DIRT.includes(nameAt(t)));
+  const other = swapTiles.filter((t) => SWAPPABLE.includes(nameAt(t)) && !DROPS_DIRT.includes(nameAt(t)));
+  const ordered = [...soilTiles, ...self, ...other.slice(0, countItem(bot, 'dirt'))];
+  const tiles = ordered.slice(0, n);
   const tilled = await tillAndPlant(ctx, tiles);
   const w = site.water;
-  ctx.village?.setField({ x: w.x, y: w.y, z: w.z }, tilled);
-  ctx.memory.setPlace('field', { x: w.x, y: w.y, z: w.z, note: `wheat field (${tilled} planted)` });
+  if (tilled > 0) {
+    ctx.village?.setField({ x: w.x, y: w.y, z: w.z }, tilled);
+    ctx.memory.setPlace('field', { x: w.x, y: w.y, z: w.z, note: `wheat field (${tilled} planted)` });
+  }
   return tilled
     ? `made the village wheat field by the water at ${fmtPos(w)}: ${tilled} seeds planted. Wheat ripens in ~30-60 min; then farm {"action":"tend"} harvests, replants and bakes bread`
     : `could not till or plant the field (tried ${lastTill.tried} tiles, reached ${lastTill.reached}, tilled ${lastTill.tilled}${lastTill.why ? `; ${lastTill.why}` : ''})`;
@@ -112,10 +145,32 @@ async function tillAndPlant(ctx: SkillContext, tiles: Vec3[] | Array<{ x: number
     let b = bot.blockAt(p);
     // Sand/gravel/podzol on the shore: put a dirt block there first.
     if (b && SWAPPABLE.includes(b.name)) {
-      const dirt = findItem(bot, 'dirt');
-      if (!dirt) continue;
+      const dropsDirt = DROPS_DIRT.includes(b.name);
+      if (!dropsDirt && !findItem(bot, 'dirt')) {
+        lastTill.why = `${b.name} at ${fmtPos(p)} needs a dirt block and I have none`;
+        continue;
+      }
+      const before = countItem(bot, 'dirt');
       await bot.dig(b, true).catch(() => undefined);
-      await placeItemAt(ctx, dirt, p);
+      if (dropsDirt && countItem(bot, 'dirt') <= before) {
+        // the dirt fell into the 1-deep hole: step in to pick it up, then step back out to place it
+        await sleep(300);
+        await walkStraight(bot, p, 1500).catch(() => false);
+        await sleep(300);
+        const out = [v3(1, 1, 0), v3(-1, 1, 0), v3(0, 1, 1), v3(0, 1, -1)].map((d) => p.plus(d)).find((q) => isStandable(bot, q));
+        if (out) {
+          await walkStraight(bot, out, 1500).catch(() => false);
+          if (bot.entity.position.y < p.y + 0.9) {
+            bot.setControlState('jump', true);
+            await sleep(300);
+            bot.setControlState('jump', false);
+            await walkStraight(bot, out, 1500).catch(() => false);
+          }
+        }
+        bot.clearControlStates();
+      }
+      const dirt = findItem(bot, 'dirt');
+      if (dirt) await placeItemAt(ctx, dirt, p);
       b = bot.blockAt(p);
     }
     if (b && TILLABLE.includes(b.name) && hoe) {
@@ -146,6 +201,10 @@ async function tendField(ctx: SkillContext): Promise<string> {
   const f = ctx.village?.data.field ?? ctx.memory.place('field');
   if (!f) return 'no field yet: farm {"action":"setup"} makes one by the water';
   await gotoNear(ctx, f.x, f.y, f.z, 3, 90_000).catch(() => undefined);
+  if (!fieldAlive(ctx, f)) {
+    forgetField(ctx);
+    return `the field at ${fmtPos(f)} is gone (no farmland or wheat left): ${await setupField(ctx)}`;
+  }
   const near = (p: Vec3): boolean => Math.abs(p.x - f.x) <= 5 && Math.abs(p.z - f.z) <= 5 && Math.abs(p.y - f.y) <= 2;
   const ripe = findBlocks(bot, ['wheat'], 12, 80).filter((b) => near(b.position) && Number(b.getProperties().age ?? 0) >= 7);
   let harvested = 0;

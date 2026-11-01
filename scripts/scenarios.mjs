@@ -460,6 +460,22 @@ export const scenarios = {
     return ok(planted >= 6, `${r.slice(0, 120)} | planted=${planted}`);
   },
 
+  // Podzol shore and NO dirt carried: dig the podzol (it drops dirt), put the dirt back, till, plant.
+  async field_podzol(ctx, P) {
+    const { X, Y, Z } = P;
+    const cx = X + 6;
+    await P.cmd(`fill ${cx - 3} ${Y - 1} ${Z - 3} ${cx + 3} ${Y - 1} ${Z + 3} minecraft:podzol`);
+    await P.cmd(`setblock ${cx} ${Y - 1} ${Z} minecraft:water`);
+    await P.give('wheat_seeds', 6);
+    await P.give('wooden_hoe', 1);
+    await P.sleep(1500);
+    const r = await farmSkill(ctx, { action: 'setup', crop: 'wheat' });
+    let planted = 0;
+    for (let x = cx - 3; x <= cx + 3; x++) for (let z = Z - 3; z <= Z + 3; z++) if (await isBlock(P, x, Y, z, 'minecraft:wheat')) planted++;
+    const field = ctx.village.data.field;
+    return ok(planted >= 4 && field?.planted > 0, `${r.slice(0, 150)} | planted=${planted} field=${JSON.stringify(field ?? null).slice(0, 60)}`);
+  },
+
   async farm(ctx, P) {
     await P.cmd(`fill ${P.X - 3} ${P.Y - 1} ${P.Z - 3} ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:dirt`);
     await P.cmd(`setblock ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:water`);
