@@ -12,7 +12,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, walkStraight, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
@@ -121,6 +121,7 @@ const FACE_OFFSETS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [
 /** Skills that build or repair the home on purpose and may dig there (hollowing, doorways, crops). */
 /** Skills a bot may run while dug in for the night (none of them walk away). */
 const BUNKER_SAFE_SKILLS = new Set(['say', 'read_book', 'read_signs', 'write_book', 'remember', 'set_goal', 'eat', 'wait', 'check_temperature']);
+const TOOL_TIER = ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite'];
 const HOME_BUILD_SKILLS = new Set(['build_shelter', 'extend_shelter', 'add_door', 'place_bed', 'farm']);
 const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|lantern|_sign$|lectern|glass|bedrock|_wool$|farmland|campfire/;
 
@@ -218,6 +219,7 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  private readonly lastGift = new Map<string, number>();
   private currentReflex: Reflex | undefined;
   private skippedInARow = 0;
   private pendingMentee: BotAgent | undefined;
@@ -448,6 +450,7 @@ export class BotAgent {
           this.helpCheckTick();
         }
         this.answerQuestion(username, message, speakerPos);
+        this.answerRequest(username, message, speakerPos);
         this.learnFromTalk(username, message);
         // "Stored 15 cobblestone in the chest at x y z" from someone nearby -> update our chest knowledge.
         const report = parseChestReport(message);
@@ -630,6 +633,26 @@ export class BotAgent {
     this.jsonl.write('answered', { to: from, question: text, answer: ans });
   }
 
+  /** "Can you give me some food?" from someone in earshot: hand it over if we can spare it. */
+  private answerRequest(from: string, raw: string, speakerPos: { x: number; y: number; z: number } | undefined): void {
+    if (from === this.name || !this.bot?.entity || !speakerPos) return;
+    const text = classifyChat(raw).text.toLowerCase();
+    const m = /\b(give|bring|pass|toss|share|spare|need)\b.*\b(food|meat|beef|bread|pork|mutton|chicken|pickaxe|torch(?:es)?|planks|logs?|coal)\b/.exec(text);
+    if (!m) return;
+    if (!new RegExp(`\\b${this.name}\\b`, 'i').test(text) && !/\b(anyone|someone|me)\b/.test(text)) return;
+    const d = this.bot.entity.position.distanceTo(this.bot.entity.position.clone().set(speakerPos.x, speakerPos.y, speakerPos.z));
+    if (d > 32 || Date.now() - (this.lastGift.get(from) ?? 0) < 60_000) return;
+    const want = m[2]!;
+    const isFood = /food|meat|beef|bread|pork|mutton|chicken/.test(want);
+    const have = isFood ? this.foodItemCount() : this.bot.inventory.items().filter((i) => i.name.includes(want.replace(/es$|s$/, ''))).reduce((n, i) => n + i.count, 0);
+    const keep = isFood ? 2 : /pickaxe/.test(want) ? 1 : 0;
+    if (have <= keep) return;
+    const n = Math.max(1, Math.min(isFood ? 6 : 16, Math.floor((have - keep) / (isFood ? 1 : 2))));
+    this.lastGift.set(from, Date.now());
+    this.queueFirst({ skill: 'give', args: { player: from, item: isFood ? 'food' : want, count: n }, thought: `order from ${from}: they asked for ${want}` });
+    this.speakLines([`${from}, coming with ${n} ${want}.`]);
+  }
+
   /** "iron ore at 120 40 -5" said or shouted by someone: remember it as a find of that kind. */
   private learnFromTalk(from: string, raw: string): void {
     if (from === this.name) return;
@@ -648,6 +671,8 @@ export class BotAgent {
     if (!m && !(skill === 'attack' && /none remembered/.test(result))) return;
     const what = String(m?.[1] ?? args.target ?? args.block ?? '').replace(/_/g, ' ');
     if (!what) return;
+    // Only things you find in the world (animals, ores, trees, water...), not crafted items like torches.
+    if (!askedFor(`where are ${what}?`).length) return;
     if (Date.now() - (this.askedAt.get(what) ?? 0) < 600_000) return;
     this.askedAt.set(what, Date.now());
     this.news(`Anyone know where ${what}${/s$/.test(what) ? '' : 's'} are?`);
@@ -1072,6 +1097,11 @@ export class BotAgent {
         }
       }
     }
+    // supplies: help a hungry / pickaxe-less teammate nearby (either side checks)
+    for (const peer of this.deps.peers?.() ?? []) {
+      const pp = peer.position();
+      if (peer !== this && !peer.isDead && pp) this.shareSupplies(peer, me.distanceTo(pp));
+    }
     // meetings: knowledge flows both ways between bots in earshot (initiated by one side of the pair)
     const range = this.deps.config.chatRange;
     for (const peer of this.deps.peers?.() ?? []) {
@@ -1105,6 +1135,64 @@ export class BotAgent {
     }
     if (items.length) this.speakLines([`${other.name}, ${items.map((i) => i.text).join('; ')}.`]);
     return items.length;
+  }
+
+  /** Edible items carried (not rotten flesh / spider eyes). */
+  foodItemCount(): number {
+    const bot = this.bot;
+    if (!bot) return 0;
+    return bot.inventory.items().filter((i) => bot.registry.foodsByName[i.name] && !/rotten|spider_eye|poisonous|pufferfish/.test(i.name)).reduce((n, i) => n + i.count, 0);
+  }
+
+  /** Hunger bar (0-20). */
+  foodLevel(): number {
+    return this.bot?.food ?? 20;
+  }
+
+  hasPickaxe(): boolean {
+    return !!this.bot?.inventory.items().some((i) => /_pickaxe$/.test(i.name));
+  }
+
+  /**
+   * Teammates help each other: a hungry bot with (almost) no food gets some of our spare food, a bot
+   * without a pickaxe gets our spare one. We walk over and hand it over (give skill), at most every 3 min
+   * per teammate.
+   */
+  private shareSupplies(peer: BotAgent, distance: number): void {
+    const bot = this.bot;
+    if (!bot || distance > 32 || this.forcedStep || this.isApprentice()) return;
+    if (Date.now() - (this.lastGift.get(peer.name) ?? 0) < 180_000) return;
+    const mine = this.foodItemCount();
+    if (peer.foodItemCount() < 2 && peer.foodLevel() <= 14 && mine >= 4) {
+      const n = Math.min(6, Math.floor(mine / 2));
+      this.lastGift.set(peer.name, Date.now());
+      this.queueFirst({ skill: 'give', args: { player: peer.name, item: 'food', count: n }, thought: `order from myself: ${peer.name} is hungry, share food` });
+      this.speakLines([`${peer.name}, you look hungry - bringing you ${n} food.`]);
+      return;
+    }
+    const picks = bot.inventory.items().filter((i) => /_pickaxe$/.test(i.name));
+    if (!peer.hasPickaxe() && picks.length >= 2) {
+      const worst = picks.sort((a, b) => TOOL_TIER.indexOf(a.name.split('_')[0]!) - TOOL_TIER.indexOf(b.name.split('_')[0]!))[0]!;
+      this.lastGift.set(peer.name, Date.now());
+      this.queueFirst({ skill: 'give', args: { player: peer.name, item: worst.name, count: 1 }, thought: `order from myself: give ${peer.name} my spare pickaxe` });
+      this.speakLines([`${peer.name}, take my spare ${worst.name.replace('_', ' ')}.`]);
+    }
+  }
+
+  /** A teammate just tossed us something: step to the dropped items near us (they land 2-3 blocks away). */
+  async pickUpGift(): Promise<void> {
+    const bot = this.bot;
+    if (!bot?.entity || this.reflexBusy) return;
+    await sleep(700); // let the items land
+    const items = Object.values(bot.entities)
+      .filter((e) => e.name === 'item' && e.position.distanceTo(bot.entity.position) <= 6)
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position));
+    for (const it of items.slice(0, 3)) {
+      if (!bot.entity || this.reflexBusy) return;
+      await walkStraight(bot, it.position.floored(), 2500).catch(() => false);
+    }
+    bot.clearControlStates();
+    this.jsonl.write('picked_up_gift', { items: items.length });
   }
 
   /** Current position (for other agents). */
@@ -1384,6 +1472,8 @@ export class BotAgent {
       })(),
       bunkeredAtDay: !!this.bunker && bot.time.timeOfDay < 12_000,
       preyKnown: this.nearestPrey() !== undefined || (this.memory.data.discoveries ?? []).some((d) => PREY_LABELS.has(d.what)),
+      preyNear: this.nearestPrey(24) !== undefined,
+      foodItems: this.foodItemCount(),
       helpCall:
         this.helpCall && Date.now() - this.helpCall.at < 90_000
           ? { distance: bot.entity.position.distanceTo(bot.entity.position.clone().set(this.helpCall.pos.x, this.helpCall.pos.y, this.helpCall.pos.z)) }
@@ -1836,6 +1926,11 @@ export class BotAgent {
     if (/^interrupted \((?!order from|message from)/.test(result) && action.thought.startsWith('order from') && !this.forcedStep && resumes < 3) {
       this.forcedStep = { ...action, resumes: resumes + 1 } as PlannedAction;
       result += ' (will resume the order)';
+    }
+    // We handed something to a teammate: they step over and pick it up.
+    if (action.skill === 'give' && /^gave /.test(result)) {
+      const to = String(action.args.player ?? '');
+      void this.deps.peers?.().find((p) => p.name === to && !p.isDead)?.pickUpGift();
     }
     // Tell the model what really changed (a gather that "timed out" may still have collected a lot).
     const delta = this.inventoryDelta(invBefore);

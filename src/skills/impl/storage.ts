@@ -132,13 +132,22 @@ export async function giveSkill(ctx: SkillContext, a: SkillArgsOf<'give'>): Prom
   const { bot } = ctx;
   const player = nearestEntity(ctx, a.player, 48);
   if (!player) return `${a.player} not nearby`;
-  const item = bot.inventory.items().find((i) => i.name === a.item.toLowerCase());
+  const want = a.item.toLowerCase().replace(/^minecraft:/, '');
+  // "food" = our best food; otherwise exact name or a generic one ("pickaxe", "logs", "torch")
+  const foods = bot.registry.foodsByName;
+  const edible = bot.inventory.items().filter((i) => foods[i.name] && !/rotten|spider_eye|poisonous|pufferfish/.test(i.name));
+  const item = /^(food|meat)$/.test(want)
+    ? edible.sort((x, y) => (foods[y.name]?.foodPoints ?? 0) - (foods[x.name]?.foodPoints ?? 0))[0]
+    : bot.inventory.items().find((i) => i.name === want) ?? bot.inventory.items().find((i) => itemMatches(want.replace(/es$|s$/, ''), i.name) || i.name.includes(want));
   if (!item) return `no ${a.item} in inventory`;
-  await gotoNear(ctx, player.position.x, player.position.y, player.position.z, 2, 30_000);
-  await bot.lookAt(player.position.offset(0, 1.6, 0), true);
+  // Close enough that the item lands at their feet (tossed items are only picked up within ~1 block).
+  await gotoNear(ctx, player.position.x, player.position.y, player.position.z, 1.5, 30_000);
+  const target = nearestEntity(ctx, a.player, 8) ?? player;
+  await bot.lookAt(target.position.offset(0, 0.5, 0), true);
   const n = Math.min(item.count, a.count);
   await bot.toss(item.type, null, n);
-  return `tossed ${n} ${item.name} to ${a.player}`;
+  bot.chat(`${a.player}: here, ${n} ${item.name.replace(/_/g, ' ')}.`);
+  return `gave ${n} ${item.name} to ${a.player}`;
 }
 
 /** Does chest item `have` satisfy a requested name ("wool" matches white_wool, "log" matches oak_log)? PURE. */

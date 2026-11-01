@@ -525,6 +525,11 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   - *Village library* (`library_write` / `library_read`, chest in `village.json`): best lessons + finds as
     a written book; newborns read it after being taught; bots with a book and quill add to it (daytime,
     in the village, every 30 min at most).
+- **Food reserve & sharing**: the ladder wants 8+ food; by day with < 3 food items and an animal within 24
+  blocks the `hunt` reflex stocks up. `shareSupplies` (social tick, either side, every 3 min per pair): a
+  teammate with < 2 food and hunger <= 14 gets up to 6 of our food if we have >= 4; one without a pickaxe gets
+  our worst spare. "can you give me food/pickaxe/torches?" in earshot is honoured (`answerRequest`). `give`
+  understands "food"/generic names, hands over at 1.5 blocks, and the receiver walks to the dropped items.
 - **Births** (`population.*`): at most `maxBirthsPerDay` (2) per MC day; only at a bed with a settled bot
   within `birthNeedsBotWithin` (24) blocks; the newborn's home and bed are its birth bed; it is an
   *apprentice* (`apprenticeSeconds`, 300): no digging, no planning (answers only) until the nearest bot has

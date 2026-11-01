@@ -29,6 +29,8 @@ const CHEAT_SHEET = `MINECRAFT BASICS (the rest you must find out yourself and t
   (more in deep winter). A room warms up SLOWLY: after heat_room, wait instead of adding torches. A campfire
   or lit furnace makes a small room too hot.
 - Food: kill animals; cooked meat (smelt it) feeds much more than raw. Food heals you when you are full.
+  Always carry SPARE food (8+): hunger comes fast, and winter has few animals. Teammates share: give
+  food to a hungry one, ask nearby bots ("can you give me food?") when you run out.
 - Night: monsters spawn in darkness. Zombies and skeletons burn in sunlight; creepers explode; spiders climb.
 - Falling more than ~4 blocks hurts; lava kills; you can drown.
 - Saplings (dropped by leaves) grow into new trees: plant them near where you got logs (plant_sapling) so

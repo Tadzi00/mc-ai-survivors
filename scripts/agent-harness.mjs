@@ -121,6 +121,45 @@ const scenarios = {
     return { ok: dead && survived, why: `husk killed=${dead}, bot alive=${survived}` };
   },
 
+  /** A teammate with spare food walks over and gives some to a hungry bot that has none. */
+  async share_food() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_share', x: X, z: Z },
+      { name: 'TestB_share', x: X + 12, z: Z },
+    ]);
+    await cmd('give TestA_share minecraft:cooked_beef 8');
+    await cmd('effect give TestB_share minecraft:hunger 4 255');
+    await sleep(5000);
+    // the hungry bot may eat it straight away: count what it holds plus what it ate (food level rose)
+    const hunger0 = Number(/(\d+)$/.exec(await cmd('data get entity TestB_share foodLevel'))?.[1] ?? 0);
+    let got = 0, hunger = hunger0;
+    for (let i = 0; i < 40 && got === 0 && hunger <= hunger0; i++) {
+      await sleep(1000);
+      got = Number(/Found (\d+)/.exec(await cmd('clear TestB_share minecraft:cooked_beef 0'))?.[1] ?? 0);
+      hunger = Number(/(\d+)$/.exec(await cmd('data get entity TestB_share foodLevel'))?.[1] ?? 0);
+    }
+    await stopAgents([a, b]);
+    return { ok: got > 0 || hunger > hunger0, why: `hungry bot holds ${got} cooked beef, food ${hunger0} -> ${hunger}` };
+  },
+
+  /** "Can you give me some food?" -> a teammate hands it over. */
+  async ask_give() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_give', x: X, z: Z },
+      { name: 'TestB_give', x: X + 6, z: Z },
+    ]);
+    await cmd('give TestA_give minecraft:bread 6');
+    await sleep(2000);
+    b.bot.chat('TestA_give, can you give me some food?');
+    let got = 0;
+    for (let i = 0; i < 30 && got === 0; i++) {
+      await sleep(1000);
+      got = Number(/Found (\d+)/.exec(await cmd('clear TestB_give minecraft:bread 0'))?.[1] ?? 0);
+    }
+    await stopAgents([a, b]);
+    return { ok: got > 0, why: `asked for food, received ${got} bread` };
+  },
+
   /** Starving agent with no food hunts a cow by itself. */
   async starving() {
     const [a] = await startAgents([{ name: 'TestA_food', x: X, z: Z }]);

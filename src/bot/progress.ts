@@ -86,9 +86,9 @@ export function milestones(f: ProgressFacts): Milestone[] {
     },
     {
       id: 'food',
-      label: 'food (5)',
-      done: f.foodCount >= 5,
-      hint: `hunt animals: {"skill":"attack","args":{"target":"cow"}} (or pig/chicken/sheep), then eat when hungry`,
+      label: 'spare food (8)',
+      done: f.foodCount >= 8,
+      hint: `keep a food reserve of 8+ (cook meat: smelt it, it feeds twice as much): {"skill":"attack","args":{"target":"cow"}} (or pig/chicken/sheep). Share with hungry teammates (give)`,
     },
     {
       id: 'blocks',

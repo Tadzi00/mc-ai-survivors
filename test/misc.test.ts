@@ -29,6 +29,11 @@ describe('reflex choice', () => {
     expect(chooseReflex({ ...calm, health: 8, hasWeapon: true, hostile: z })).toBe('flee');
   });
   it('eats when hungry', () => expect(chooseReflex({ ...calm, food: 10 })).toBe('eat'));
+  it('stocks up on food by day when the reserve is low and an animal is near', () => {
+    expect(chooseReflex({ ...calm, hasFood: true, food: 16, foodItems: 1, preyNear: true })).toBe('hunt');
+    expect(chooseReflex({ ...calm, hasFood: true, food: 16, foodItems: 5, preyNear: true })).toBe(null);
+    expect(chooseReflex({ ...calm, hasFood: true, food: 16, foodItems: 1, preyNear: true, isNight: true })).not.toBe('hunt');
+  });
   it('hunts when starving with no food, if prey is known', () => {
     expect(chooseReflex({ ...calm, hasFood: false, food: 6, preyKnown: true })).toBe('hunt');
     expect(chooseReflex({ ...calm, hasFood: false, food: 6, preyKnown: false })).toBeNull();

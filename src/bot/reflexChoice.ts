@@ -14,6 +14,10 @@ export interface ReflexState {
   bunkeredAtDay?: boolean;
   /** An animal to eat is visible within 48 blocks or remembered. */
   preyKnown?: boolean;
+  /** Food items carried (a reserve, not just "any"). */
+  foodItems?: number;
+  /** An animal to eat is visible within 24 blocks right now. */
+  preyNear?: boolean;
   /** A teammate's HELP shout heard recently (distance to the given coordinates). */
   helpCall?: { distance: number };
   /** Hostile mobs within 10 blocks (defaults to 1 when a hostile is known). */
@@ -60,6 +64,8 @@ export function chooseReflex(s: ReflexState): Reflex | null {
   if (s.hasFood && (s.food <= 14 || (s.health < 12 && s.food < 20))) return 'eat';
   // Starving with nothing to eat: go get food NOW (the model kept gathering wood until it starved).
   if (!s.hasFood && s.food <= 6 && s.preyKnown) return 'hunt';
+  // Keep a reserve: in daylight with an animal in sight, stock up before hunger becomes an emergency.
+  if (s.foodItems !== undefined && s.foodItems < 3 && s.food <= 18 && s.preyNear && !s.isNight && !s.hostile) return 'hunt';
   if (s.cold === true) {
     if (s.homeKnown) return 'warm_home';
     if (s.hasTorch) return 'warm_torch';
