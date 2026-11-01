@@ -450,6 +450,14 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
     const n = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].map((o) => bot.blockAt(p.plus(o))?.name ?? '');
     if (n.some((x) => x === 'water' || x === 'lava')) return { why: 'water or lava next to the hole' };
   }
+  // The side walls where we will stand (feet d3, head d2) must be solid: a hole that cuts into a cave has
+  // an open side and mobs walk right in. Open sides get a block; without enough blocks: not here.
+  const SIDES = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)];
+  const openSides = (): Vec3[] => [d2, d3].flatMap((c) => SIDES.map((o) => c.plus(o))).filter((p) => !isSolid(bot.blockAt(p)));
+  const fill = /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel|andesite|diorite|granite|tuff)$/;
+  const blocks = (): number => bot.inventory.items().filter((i) => fill.test(i.name)).reduce((n, i) => n + i.count, 0);
+  const gaps = openSides();
+  if (gaps.length && blocks() < gaps.length + 1) return { why: `the hole would open into a cave (${gaps.length} open side(s)) and I have too few blocks to wall it` };
   bot.pathfinder.stop();
   // Stand in the middle of the cell: off-centre, the bot dug the hole next to its feet, never fell in,
   // sealed an empty hole and stayed outside all night thinking it was safe.
@@ -472,9 +480,18 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   if (feetNow.x !== d3.x || feetNow.z !== d3.z || feetNow.y > d3.y + 1) {
     return { why: `dug a hole at ${fmtPos(d3)} but did not end up in it (standing at ${fmtPos(feetNow)})` };
   }
+  // wall up any open side (cave) before sealing the top
+  for (const p of openSides()) {
+    const item = bot.inventory.items().find((i) => fill.test(i.name));
+    if (item) await placeItemAt(ctx, item, p);
+  }
+  const stillOpen = openSides();
+  if (stillOpen.length) return { why: `dug in but the hole has ${stillOpen.length} open side(s) into a cave (not safe)` };
   if (!cover) return { feet: d3, why: 'dug in but have no block to seal the top' };
-  const ok = await placeItemAt(ctx, cover, d1);
-  return { feet: d3, why: ok ? 'dug in and sealed the top' : 'dug in but could not seal the top' };
+  const cov = bot.inventory.items().find((i) => fill.test(i.name)) ?? cover;
+  const ok = await placeItemAt(ctx, cov, d1);
+  if (!ok) return { why: 'dug in but could not seal the top (not safe)' };
+  return { feet: d3, why: `dug in and sealed the top${gaps.length ? ` (walled ${gaps.length} cave opening(s))` : ''}` };
 }
 
 /**

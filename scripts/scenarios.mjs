@@ -605,6 +605,27 @@ export const scenarios = {
     return ok(!!r.feet && gaps === 0 && moved, `${r.why} | gaps=${gaps} | ${out} | moved out=${moved}`);
   },
 
+  // The hole cuts into a cave: the open side gets walled before the top is sealed.
+  async bunker_cave(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`fill ${X + 1} ${Y - 3} ${Z - 1} ${X + 3} ${Y - 2} ${Z + 1} minecraft:air`); // cave right next to the feet/head cells
+    await P.give('dirt', 8);
+    await P.sleep(800);
+    const r = await digBunker(ctx);
+    const wall = (await isBlock(P, X + 1, Y - 3, Z, 'minecraft:dirt')) && (await isBlock(P, X + 1, Y - 2, Z, 'minecraft:dirt'));
+    return ok(!!r.feet && wall, `${r.why} | cave side walled=${wall}`);
+  },
+
+  // Same cave, no blocks to wall it with: refuse (the night reflex then finds another spot or builds a hut).
+  async bunker_cave_noblocks(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`fill ${X + 1} ${Y - 3} ${Z - 1} ${X + 3} ${Y - 2} ${Z + 1} minecraft:air`);
+    await P.sleep(800);
+    const r = await digBunker(ctx);
+    const untouched = await isBlock(P, X, Y - 1, Z, 'minecraft:stone');
+    return ok(!r.feet && untouched, `${r.why} | ground untouched=${untouched}`);
+  },
+
   async bunker_not_in_water(ctx, P) {
     const { X, Y, Z } = P;
     await P.cmd(`fill ${X - 2} ${Y} ${Z - 2} ${X + 2} ${Y} ${Z + 2} minecraft:water`);
