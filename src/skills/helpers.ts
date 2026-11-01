@@ -455,6 +455,9 @@ export async function digBunker(ctx: SkillContext): Promise<{ feet?: Vec3; why: 
   await walkStraight(bot, top, 1500).catch(() => false);
   bot.clearControlStates();
   await sleep(150);
+  // The hole goes straight down through natural ground under our feet (checked above): allowed even at a
+  // home spot that is not a shelter yet (the dig guard refused it and the bot stayed outside all night).
+  for (const p of [d1, d2, d3]) ALLOWED_DIGS.add(digKey(p));
   for (const p of [d1, d2, d3]) {
     if (wet(bot.entity.position.floored()) || wet(bot.entity.position.floored().offset(0, 1, 0))) {
       return { why: 'water flowed in while digging; stopped' };
