@@ -13,6 +13,19 @@ npm start              # run orchestrator (needs config.yaml, a server with RCON
 cd bridge-plugin && ./gradlew build   # -> bridge-plugin/build/libs/SurvivorsBridge-*.jar
 ```
 
+## Live tests (need the Docker server running and `.env` loaded: `set -a; . ./.env; set +a`)
+
+```bash
+node scripts/harness.mjs [scenario...]        # skills on a temporary platform at x≈3000,y=200 (20 scenarios)
+node scripts/agent-harness.mjs [scenario...]  # full BotAgents with a stub model (fight, rescue, orders, ...)
+node scripts/shelter-test.mjs                 # build + extend shelter, check sealed/warm
+scripts/run-bots.sh                           # run the real bots with auto-restart (pkill node → reload)
+```
+
+Run the harnesses after changing skills/reflexes; they check results through RCON (server truth). Notes:
+blocks placed with /fill or /setblock fire no events (RealisticSeasons caches, bed index) and /fill is
+limited to 32768 blocks.
+
 ## Read first
 
 **`DESIGN.md`** explains what is intentional (permanent death, proximity chat, one JSON action per
