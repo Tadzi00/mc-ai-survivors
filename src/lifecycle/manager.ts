@@ -222,8 +222,8 @@ export class LifecycleManager {
         agent.memory.setPlace('home', { x: bed.x, y: bed.y, z: bed.z, note: 'where I was born' });
         agent.memory.setPlace('bed', { x: bed.x, y: bed.y, z: bed.z });
         agent.startApprenticeship(this.config.population.apprenticeSeconds);
+        setTimeout(() => this.assignMentor(agent), 4_000); // only newborns get a teacher, not the first bots
       }
-      setTimeout(() => this.assignMentor(agent), 4_000);
     }
     if (!bed) return;
     this.newborns.delete(agent.name);
