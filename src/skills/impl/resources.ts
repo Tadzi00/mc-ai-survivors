@@ -363,6 +363,15 @@ function genericWood(name: string): string {
  * spruce logs -> "spruce_planks". Other names pass through.
  */
 function woodAlias(bot: Bot, name: string): string {
+  // Beds come in the colour of the wool: "white_bed"/"bed" with only black wool -> "black_bed".
+  if (/^(\w+_)?bed$/.test(name)) {
+    const wool = bot.inventory
+      .items()
+      .filter((i) => i.name.endsWith('_wool'))
+      .sort((p, q) => q.count - p.count)[0];
+    if (wool && wool.count >= 3) return wool.name.replace(/_wool$/, '_bed');
+    if (name === 'bed') return 'white_bed';
+  }
   // Bare tool names ("pickaxe", "sword") -> best tier the bot has material for.
   const tool = /^(pickaxe|axe|sword|shovel|hoe)$/.exec(name);
   if (tool) {

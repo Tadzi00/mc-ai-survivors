@@ -55,7 +55,7 @@ export function milestones(f: ProgressFacts): Milestone[] {
     }
     if (bedsInInv > 0) return `go inside your shelter and place it: {"skill":"place_bed","args":{}}`;
     if (wool < 3) return `need ${3 - wool} more wool for a ${which} bed: kill sheep {"skill":"attack","args":{"target":"sheep"}}`;
-    return `craft the ${which} bed: {"skill":"craft","args":{"item":"white_bed","count":1}}`;
+    return `craft the ${which} bed: {"skill":"craft","args":{"item":"bed","count":1}} (any wool colour works)`;
   };
 
   return [

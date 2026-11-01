@@ -77,6 +77,15 @@ export const scenarios = {
     return ok(pk === 1 && sw === 1, `${a} | ${b} | stone_pickaxe=${pk} wooden_sword=${sw}`);
   },
 
+  async craft_bed(ctx, P) {
+    await P.give('black_wool', 3);
+    await P.give('oak_planks', 7);
+    await P.sleep(800);
+    const r = await craftSkill(ctx, { item: 'white_bed', count: 1 });
+    const beds = await count(P, 'black_bed');
+    return ok(beds === 1, `${r} | black_bed=${beds}`);
+  },
+
   async bed_claim(ctx, P) {
     await room(P);
     ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
