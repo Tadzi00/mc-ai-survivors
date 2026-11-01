@@ -421,6 +421,7 @@ export class BotAgent {
       const moves = new Movements(bot);
       moves.canDig = true;
       moves.allowParkour = false; // fewer fatal falls
+      moves.maxDropDown = 3; // falls of 4+ blocks hurt (an elder died chasing a cow off a ledge)
       moves.allowSprinting = true;
       // No scaffolding: the pathfinder used to place dirt/cobblestone to climb or bridge and then dig it out
       // again a moment later (pointless place/break loops, wasted blocks). Walk around instead.

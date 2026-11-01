@@ -55,6 +55,7 @@ function spawnBot(name) {
       const mv = new pf.Movements(bot);
       mv.canDig = true;
       mv.allowParkour = false;
+      mv.maxDropDown = 3;
       enableDoorPathing(bot, mv);
       mv.scafoldingBlocks = [];
       mv.allow1by1towers = false;
