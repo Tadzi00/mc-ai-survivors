@@ -115,3 +115,13 @@ describe('conclusions', () => {
     expect(parsePlan('{"learned":"x","skill":"eat"}', 'basic').ok && (parsePlan('{"learned":"x","skill":"eat"}', 'basic') as { learned?: string }).learned).toBeUndefined();
   });
 });
+
+import { parsePlan as pp } from '../src/bot/action.js';
+describe('item name cleanup', () => {
+  it('strips counts and namespaces', () => {
+    const r = pp('{"thought":"t","skill":"smelt","args":{"item":"raw_iron:3"}}', 'smart');
+    expect(r.ok && r.steps[0]!.args).toMatchObject({ item: 'raw_iron', count: 3 });
+    const g = pp('{"thought":"t","skill":"gather","args":{"block":"minecraft:oak_log","count":4}}', 'smart');
+    expect(g.ok && g.steps[0]!.args).toMatchObject({ block: 'oak_log', count: 4 });
+  });
+});

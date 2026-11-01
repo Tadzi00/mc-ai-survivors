@@ -28,6 +28,22 @@ export function parseAction(text: string, tier: Tier): ParseResult {
     const { thought: _t, skill: _s, action: _a, say: _say, learned: _l, forget: _f, ...rest } = o;
     o.args = rest;
   }
+  // Models write "raw_iron:1", "minecraft:oak_log", "stone_pickaxe x2": clean item/block names (the count
+  // goes to "count" if none was given). Skills then got "no raw_iron:1 in inventory" again and again.
+  if (o.args && typeof o.args === 'object' && !Array.isArray(o.args)) {
+    const args = { ...(o.args as Record<string, unknown>) };
+    for (const k of ['item', 'block', 'target']) {
+      const v = args[k];
+      if (typeof v !== 'string') continue;
+      const m = /^(?:minecraft:)?([a-z0-9_ ]+?)\s*(?:[:x*]\s*(\d+))?$/i.exec(v.trim());
+      if (!m) continue;
+      args[k] = m[1]!.trim().toLowerCase().replace(/\s+/g, '_');
+      if (m[2] && args.count === undefined && k !== 'target') args.count = Number(m[2]);
+    }
+    // "gather 65 cobblestone" was rejected outright (max 64): cap it instead.
+    if (typeof args.count === 'number' && args.count > 64) args.count = 64;
+    o.args = args;
+  }
   const env = Envelope.safeParse(o);
   if (!env.success) return { ok: false, error: `bad envelope: ${env.error.issues.map((i) => i.message).join('; ')}` };
   const skill = env.data.skill.trim().toLowerCase();

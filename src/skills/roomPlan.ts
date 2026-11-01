@@ -2,7 +2,7 @@
 // so the model can place things sensibly, and the "keep the doorway clear" rule every placement obeys.
 import type { Bot } from 'mineflayer';
 import type { Block } from 'prismarine-block';
-import { v3, type Vec3 } from './helpers.js';
+import { isEmptyCell, v3, type Vec3 } from './helpers.js';
 
 /** Things that stand inside a room (not walls). */
 const FURNITURE = /_bed$|crafting_table|chest|barrel|furnace|smoker|torch|lantern|campfire|anvil|_carpet$|cauldron|lectern|bookshelf|_sign$|flower_pot|_banner$/;
@@ -36,7 +36,7 @@ export function scanRoom(bot: Bot, start: Vec3, maxCells = 120): RoomInfo | unde
     const c = queue.shift()!;
     const feet = bot.blockAt(c);
     if (!feet) return undefined; // unloaded
-    if ((bot.blockAt(c.offset(0, 1, 0))?.skyLight ?? 0) >= 15) return undefined; // open sky: not a room
+    if (!hasRoof(bot, c)) return undefined; // open sky: not a room (block check: light data lags behind new blocks)
     cells.push(c);
     if (FURNITURE.test(feet.name)) furniture.push({ name: feet.name, pos: c });
     if (cells.length > maxCells) return undefined;
@@ -55,6 +55,17 @@ export function scanRoom(bot: Bot, start: Vec3, maxCells = 120): RoomInfo | unde
   }
   const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
   return { y, cells, doors, furniture, x0: Math.min(...xs), z0: Math.min(...zs), x1: Math.max(...xs), z1: Math.max(...zs) };
+}
+
+/** Some solid-ish block within 6 above the floor cell (a roof). Light levels are not used: the client's
+ *  sky light is not updated for freshly placed blocks, so a just-built shelter looked like open sky. */
+function hasRoof(bot: Bot, c: Vec3): boolean {
+  for (let dy = 2; dy <= 6; dy++) {
+    const b = bot.blockAt(c.offset(0, dy, 0));
+    if (!b) return true; // unloaded/out of world: don't call it sky
+    if (b.boundingBox === 'block' || /_slab$|_stairs$|leaves/.test(b.name)) return true;
+  }
+  return false;
 }
 
 /** A spot that must stay free so the door can be used: the door itself and the cells right in front/behind. */
@@ -90,7 +101,7 @@ export function freeFloor(bot: Bot, room: RoomInfo): Vec3[] {
   return room.cells
     .filter((c) => {
       const b = bot.blockAt(c);
-      return !!b && (b.name === 'air' || b.name === 'cave_air') && !c.equals(me) && !isKeepClear(bot, c);
+      return isEmptyCell(b) && !c.equals(me) && !isKeepClear(bot, c);
     })
     .sort((a, b) => wallsAround(bot, b) - wallsAround(bot, a) || a.distanceTo(me) - b.distanceTo(me));
 }
@@ -143,4 +154,15 @@ export function buildingContents(bot: Bot, b: { x0: number; z0: number; x1: numb
   }
   if (!loaded) return undefined;
   return [...counts].map(([k, n]) => `${n} ${k}`).join(', ') || 'empty';
+}
+
+/**
+ * Where torches go: on a wall at head height (a wall torch), not on the floor. Floor torches took the cells
+ * beds need (a 3x3 room with one floor torch had no room for a second bed). Corners first, never by the door.
+ */
+export function wallTorchSpots(bot: Bot, room: RoomInfo): Vec3[] {
+  return room.cells
+    .map((c) => c.offset(0, 1, 0))
+    .filter((h) => isEmptyCell(bot.blockAt(h)) && wallsAround(bot, h) >= 1 && !isKeepClear(bot, h))
+    .sort((a, b) => wallsAround(bot, b) - wallsAround(bot, a));
 }

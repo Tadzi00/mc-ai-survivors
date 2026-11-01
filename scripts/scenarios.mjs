@@ -183,11 +183,7 @@ export const scenarios = {
   async room_plan(ctx, P) {
     await room(P);
     await P.cmd(`setblock ${P.X - 1} ${P.Y} ${P.Z - 1} minecraft:chest`);
-    // RCON blocks don't update the client's light data: go away and come back so the chunk is resent.
-    await P.cmd(`tp ${P.botName} ${P.X + 400} ${P.Y + 50} ${P.Z}`);
-    await P.sleep(2500);
-    await P.cmd(`tp ${P.botName} ${P.X + 0.5} ${P.Y} ${P.Z + 0.5}`);
-    await P.sleep(2500);
+    await P.sleep(800);
     const r = scanRoom(ctx.bot, ctx.bot.entity.position.floored());
     const plan = r ? renderRoom(ctx.bot, r) : 'no room';
     ctx.log(plan);
@@ -215,6 +211,33 @@ export const scenarios = {
     const inDoorway = await isBlock(P, P.X, P.Y, P.Z + 1, '#minecraft:beds');
     const placed = /placed/.test(r);
     return ok(placed && !inDoorway, `${r} | in doorway=${inDoorway}`);
+  },
+
+  // Two beds must fit in a 3x3 room with the door in the middle of a wall.
+  async two_beds(ctx, P) {
+    await room(P);
+    ctx.memory.setPlace('home', { x: P.X, y: P.Y, z: P.Z });
+    await P.give('white_bed', 2);
+    await P.sleep(1200);
+    const r1 = await placeBedSkill(ctx);
+    const r2 = await placeBedSkill(ctx);
+    const doorway = await isBlock(P, P.X, P.Y, P.Z + 1, '#minecraft:beds');
+    return ok(/placed/.test(r1) && /placed/.test(r2) && !doorway, `${r1} | ${r2} | doorway blocked=${doorway}`);
+  },
+
+  // The bot's own shelter, then two beds (what the shelter_beds trial does, without the model).
+  async shelter_two_beds(ctx, P) {
+    await P.give('cobblestone', 128);
+    await P.give('oak_planks', 24);
+    await P.give('white_bed', 2);
+    await P.give('torch', 4);
+    await P.sleep(1200);
+    const r0 = await buildShelterSkill(ctx, { size: 5 });
+    const r1 = await placeBedSkill(ctx);
+    const r2 = await placeBedSkill(ctx);
+    const sc = scanRoom(ctx.bot, ctx.bot.entity.position.floored());
+    ctx.log(sc ? renderRoom(ctx.bot, sc) : 'no room');
+    return ok(/placed/.test(r1) && /placed/.test(r2), `${r0.slice(0, 80)} | ${r1} | ${r2}`);
   },
 
   // A village with one building: the next shelter goes beside it (path between), even if the bot stands elsewhere.

@@ -27,3 +27,24 @@ describe('player orders', () => {
     expect(looksLikeOrder('you have a torch')).toBe(false);
   });
 });
+
+import { craftTargets, countBefore, parseDirectCommand as pdc } from '../src/bot/orders.js';
+describe('richer direct commands', () => {
+  it('build shelter with beds and a torch', () => {
+    const c = pdc('please build a shelter here and put two beds and a torch inside it', 'P')!;
+    expect(c.steps.map((s) => s.skill)).toEqual(['build_shelter', 'place_torch', 'place_bed', 'place_bed']);
+  });
+  it('craft lists', () => {
+    expect(craftTargets('make yourself a stone pickaxe, a stone sword and a stone axe').map((c) => c.item)).toEqual(['stone_pickaxe', 'stone_sword', 'stone_axe']);
+    expect(craftTargets('craft 4 torches and a chest')).toEqual([{ item: 'torch', count: 4 }, { item: 'chest', count: 1 }]);
+    expect(pdc('make yourself a stone pickaxe, a stone sword and a stone axe', 'P')!.steps).toHaveLength(3);
+  });
+  it('smelt from a chest', () => {
+    const c = pdc('there is raw iron and coal in the chest next to you, take them and smelt the iron into ingots', 'P')!;
+    expect(c.steps.map((s) => s.skill)).toEqual(['chest_take', 'smelt']);
+  });
+  it('numbers', () => {
+    expect(countBefore('put two beds inside', /beds?\b/)).toBe(2);
+    expect(countBefore('3 torches', /torch(es)?\b/)).toBe(3);
+  });
+});

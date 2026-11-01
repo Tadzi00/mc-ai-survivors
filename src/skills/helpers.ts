@@ -182,13 +182,21 @@ export async function placeItemAt(ctx: SkillContext, item: Item, pos: Vec3): Pro
   // Don't place inside our own body.
   const feet = bot.entity.position.floored();
   if (pos.equals(feet) || pos.equals(feet.offset(0, 1, 0))) return false;
+  // A skill cut short (e.g. gather interrupted by an order) can leave the pathfinder/collectblock still
+  // walking: placing while moving failed ("could not place the crafting table", then the torch). Stand still.
+  if (bot.pathfinder.isMoving() || bot.controlState.forward) {
+    bot.pathfinder.stop();
+    void (bot as unknown as { collectBlock?: { cancelTask(): Promise<void> } }).collectBlock?.cancelTask().catch(() => undefined);
+    bot.clearControlStates();
+    await sleep(400);
+  }
   // Success = the block there changed. (Checking "not air-like" wrongly failed torches, which are walk-through.)
   const before = target.name;
   const changed = (): boolean => {
     const now = bot.blockAt(pos)?.name;
     return !!now && now !== before && now !== 'air' && now !== 'cave_air';
   };
-  for (const f of FACES) {
+  for (const f of [...FACES, ...FACES]) { // second round: retry once (a placement right after moving can fail)
     const ref = bot.blockAt(pos.plus(f));
     if (!isSolid(ref)) continue;
     try {
@@ -225,7 +233,7 @@ export function freeSpotNearBot(bot: Bot): Vec3 | undefined {
   for (const dy of [0, 1, -1]) {
     for (const o of offs) {
       const p = base.plus(o).offset(0, dy, 0);
-      if (isAirLike(bot.blockAt(p)) && isSolid(bot.blockAt(p.offset(0, -1, 0))) && !isKeepClear(bot, p)) return p;
+      if (isEmptyCell(bot.blockAt(p)) && isSolid(bot.blockAt(p.offset(0, -1, 0))) && !isKeepClear(bot, p)) return p;
     }
   }
   return undefined;
@@ -578,3 +586,15 @@ export function enableDoorPathing(bot: Bot, moves: unknown): void {
   }, 150);
   bot.once('end', () => clearInterval(timer));
 }
+
+/**
+ * Really empty for placing a block: air, or plants/snow a placed block replaces. NOT a torch, flower, sign...
+ * (a torch counted as "free" and the server refused the crafting table there again and again).
+ */
+export function isEmptyCell(b: Block | null | undefined): boolean {
+  return !!b && /^(air|cave_air|void_air|short_grass|grass|tall_grass|fern|large_fern|snow|dead_bush|seagrass)$/.test(b.name);
+}
+
+/** Blocks a skill may dig once even inside a home (e.g. taking back its own crafting table). */
+export const ALLOWED_DIGS = new Set<string>();
+export const digKey = (p: { x: number; y: number; z: number }): string => `${p.x},${p.y},${p.z}`;

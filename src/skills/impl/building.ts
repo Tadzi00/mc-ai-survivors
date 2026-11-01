@@ -4,9 +4,9 @@ import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import {
-  BUILDING_BLOCK_RE, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, nearestStandable, placeItemAt, v3, type Vec3,
+  BUILDING_BLOCK_RE, isEmptyCell, walkStraight, countItem, findItem, fmtPos, freeSpotNearBot, gotoNear, isAirLike, isSolid, isStandable, MAN_MADE_RE, nearestStandable, placeItemAt, v3, type Vec3,
 } from '../helpers.js';
-import { isKeepClear, wallsAround } from '../roomPlan.js';
+import { isKeepClear, renderRoom, scanRoom, wallsAround, wallTorchSpots } from '../roomPlan.js';
 import { plotsNextTo, VILLAGE_RADIUS } from '../../bot/village.js';
 import { craftSkill } from './resources.js';
 
@@ -29,7 +29,8 @@ export async function placeTorchSkill(ctx: SkillContext): Promise<string> {
     const r = await craftSkill(ctx, { item: 'torch', count: 4 });
     if (!r.startsWith('crafted')) return `no torch: ${r} (torch = coal/charcoal + stick)`;
   }
-  const spot = freeSpotNearBot(bot);
+  const room = scanRoom(bot, bot.entity.position.floored());
+  const spot = (room && wallTorchSpots(bot, room).find((p) => p.distanceTo(bot.entity.position) <= 4.5)) ?? freeSpotNearBot(bot);
   const torch = findItem(bot, 'torch');
   if (!spot || !torch) return 'no spot for a torch';
   return (await placeItemAt(ctx, torch, spot)) ? `placed torch at ${fmtPos(spot)}` : 'failed to place torch';
@@ -46,10 +47,18 @@ function isGoodShellBlock(b: Block | null): boolean {
 }
 
 /** Picks the most plentiful building block stack, refreshed as stacks run out. */
+/** Planks kept back for a door (6) and a bed (3) unless nothing else is left to build with. */
+const PLANK_RESERVE = 9;
+
 function pickBuildingItem(ctx: SkillContext): Item | undefined {
   const items = ctx.bot.inventory.items().filter((i) => BUILDING_BLOCK_RE.test(i.name));
-  items.sort((a, b) => b.count - a.count);
-  return items[0];
+  // Cheap blocks first (cobblestone, dirt, stone); wood last: walls used to eat the planks meant for the beds.
+  const woody = (n: string): boolean => /_planks$|_log$|_wood$/.test(n);
+  const cheap = items.filter((i) => !woody(i.name)).sort((a, b) => b.count - a.count);
+  if (cheap[0]) return cheap[0];
+  const planks = countItem(ctx.bot, /_planks$/);
+  const wood = items.filter((i) => woody(i.name) && (!i.name.endsWith('_planks') || planks > PLANK_RESERVE)).sort((a, b) => b.count - a.count);
+  return wood[0] ?? items[0];
 }
 
 /**
@@ -60,6 +69,17 @@ function pickBuildingItem(ctx: SkillContext): Item | undefined {
 export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build_shelter'>): Promise<string> {
   const village = ctx.village;
   const { bot } = ctx;
+  // An interrupted build is finished where it was started (it used to start a new shelter next to the
+  // half-built walls).
+  const site = ctx.memory.place('building_site');
+  if (site && Math.hypot(site.x - bot.entity.position.x, site.z - bot.entity.position.z) <= 40) {
+    await gotoNear(ctx, site.x, site.y, site.z, 0, 30_000).catch(() => undefined);
+    if (bot.entity.position.floored().distanceTo(v3(site.x, site.y, site.z)) <= 1.5) {
+      const r = await buildShelterHere(ctx, a);
+      if (!/^(too enclosed|something built is in the way)/.test(r)) return `${r} (finished the shelter I had started)`;
+    }
+    delete ctx.memory.data.places.building_site;
+  }
   // One village: once it exists, every new building goes there, next to the others (with a path between).
   if (village?.center) {
     const c = village.center;
@@ -71,6 +91,7 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
     }
     const plots = plotsNextTo(village.data.buildings, a.size, c);
     const tried: string[] = [];
+    let unreachable = 0;
     for (const plot of plots.slice(0, 6)) {
       throwIfAborted(ctx.signal);
       const target = nearestStandable(bot, v3(plot.x, plot.y, plot.z), 2);
@@ -78,14 +99,21 @@ export async function buildShelterSkill(ctx: SkillContext, a: SkillArgsOf<'build
       try {
         await gotoNear(ctx, target.x, target.y, target.z, 0, 30_000);
       } catch {
+        unreachable++;
         continue;
       }
-      if (bot.entity.position.floored().distanceTo(target) > 1.5) continue;
+      if (bot.entity.position.floored().distanceTo(target) > 1.5) {
+        unreachable++;
+        continue;
+      }
       const r = await buildShelterHere(ctx, a);
       if (!/^(too enclosed|something built is in the way)/.test(r)) return `${r} (village plot next to the other buildings)`;
       tried.push(r.split(';')[0]!);
     }
     if (village.data.buildings.length > 0) {
+      if (unreachable && !tried.length) {
+        return `could not walk to any building plot in the village (${unreachable} unreachable${scanRoom(bot, bot.entity.position.floored()) ? '; you are shut inside a room - add_door first' : ''})`;
+      }
       return `no free plot next to the village buildings (${tried.length} tried${tried[0] ? `: ${tried[0]}` : ''}); clear flat ground beside them or extend_shelter`;
     }
   }
@@ -179,6 +207,7 @@ async function buildShelterHere(ctx: SkillContext, a: SkillArgsOf<'build_shelter
   }
   const hasDoor = countItem(bot, /_door$/) > 0;
 
+  ctx.memory.setPlace('building_site', origin); // cleared when the shelter is done
   // Stand in the centre so everything is within reach.
   await gotoNear(ctx, origin.x, origin.y, origin.z, 0, 15_000).catch(() => undefined);
 
@@ -226,11 +255,23 @@ async function buildShelterHere(ctx: SkillContext, a: SkillArgsOf<'build_shelter
     }
     ctx.memory.setPlace('doorway', v3(doorX, y0, doorZ));
   }
-  // Torch on the floor inside, away from the centre.
+  // The crafting table made for the door was placed before the walls went up and now stands inside, taking
+  // bed space: take it back (anything else built inside was refused at the start, so it is ours).
+  for (let x = x0 + 1; x <= x1 - 1; x++) {
+    for (let z = z0 + 1; z <= z1 - 1; z++) {
+      const b = bot.blockAt(v3(x, y0, z));
+      if (b && b.name === 'crafting_table') {
+        await bot.dig(b, true).catch(() => undefined);
+        await pickUpNear(ctx, b.position);
+        if (ctx.memory.place('crafting_table')?.x === x && ctx.memory.place('crafting_table')?.z === z) delete ctx.memory.data.places.crafting_table;
+      }
+    }
+  }
+  // Torch inside (wall torch in a corner), away from the centre.
   let torchMsg = 'no torch';
   if (countItem(bot, 'torch') > 0 || (await craftSkill(ctx, { item: 'torch', count: 2 })).startsWith('crafted')) {
     const torch = findItem(bot, 'torch');
-    const tp = v3(x0 + 1, y0, z0 + 1);
+    const tp = v3(x0 + 1, y0 + 1, z0 + 1); // wall torch in a corner at head height: the floor stays free for beds
     if (torch && isAirLike(bot.blockAt(tp)) && (await placeItemAt(ctx, torch, tp))) torchMsg = 'torch placed';
   }
   if (torchMsg === 'torch placed' && ctx.seasons.enabled) {
@@ -239,6 +280,7 @@ async function buildShelterHere(ctx: SkillContext, a: SkillArgsOf<'build_shelter
   }
   // Home: the first shelter becomes home; later ones are extra rooms of the village (the home stays put,
   // bots kept "forgetting" their home by building a new one somewhere and moving there).
+  delete ctx.memory.data.places.building_site;
   const oldHome = ctx.memory.place('home');
   const keepOld = !!oldHome && (!ctx.village || ctx.village.contains(oldHome));
   if (!keepOld) ctx.memory.setPlace('home', origin);
@@ -360,13 +402,32 @@ function doorNameFor(ctx: SkillContext): string {
 
 export async function placeBedSkill(ctx: SkillContext): Promise<string> {
   const { bot } = ctx;
-  const bedItem = findItem(bot, /_bed$/);
-  if (!bedItem) return 'no bed item (craft "white_bed": 3 white_wool + 3 planks)';
+  let bedItem = findItem(bot, /_bed$/);
+  if (!bedItem) {
+    // Have 3 wool and planks? Craft the bed first (the model asked for place_bed, said "no bed", moved on).
+    const wool = bot.inventory.items().find((i) => i.name.endsWith('_wool') && i.count >= 3);
+    if (wool) {
+      const r = await craftSkill(ctx, { item: wool.name.replace(/_wool$/, '_bed'), count: 1 });
+      bedItem = findItem(bot, /_bed$/);
+      if (!bedItem) return `no bed item and crafting one failed: ${r}`;
+    } else {
+      return 'no bed item (craft "white_bed": 3 white_wool + 3 planks)';
+    }
+  }
   // A bed needs two free floor cells in a line (foot, head). Its head points the way the player faces, so
   // stand on the cell behind the foot and place it facing forward. Works in a 3x3 room (corners/edges).
+  // Beds go INSIDE the home room: walk home first if it is close, then only use cells of that room
+  // (an interruption once left the bot outside and the bed went next to the shelter).
+  const home = ctx.memory.place('home');
+  if (home && !scanRoom(bot, bot.entity.position.floored()) && Math.hypot(home.x - bot.entity.position.x, home.z - bot.entity.position.z) <= 12) {
+    await gotoNear(ctx, home.x, home.y, home.z, 1, 20_000).catch(() => undefined);
+  }
+  const room = scanRoom(bot, bot.entity.position.floored());
+  const inRoom = (p: Vec3): boolean => !room || room.cells.some((c) => c.x === p.x && c.z === p.z && c.y === p.y);
   const base = bot.entity.position.floored();
   const dirs = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)];
-  const free = (p: Vec3): boolean => isAirLike(bot.blockAt(p)) && isAirLike(bot.blockAt(p.offset(0, 1, 0))) && isSolid(bot.blockAt(p.offset(0, -1, 0)));
+  // Really empty (a torch is walk-through but the server won't put a bed there).
+  const free = (p: Vec3): boolean => isEmptyCell(bot.blockAt(p)) && isAirLike(bot.blockAt(p.offset(0, 1, 0))) && isSolid(bot.blockAt(p.offset(0, -1, 0)));
   const options: Array<{ foot: Vec3; head: Vec3; stand: Vec3; d: Vec3; cost: number }> = [];
   for (let dx = -3; dx <= 3; dx++) {
     for (let dz = -3; dz <= 3; dz++) {
@@ -377,12 +438,21 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
           const stand = foot.minus(d);
           if (!free(foot) || !free(head) || !isStandable(bot, stand)) continue;
           if (isKeepClear(bot, foot) || isKeepClear(bot, head)) continue; // never in the doorway
+          if (!inRoom(foot) || !inRoom(head) || !inRoom(stand)) continue; // inside the room only
           // against walls is better than across the middle of the room
           const walls = wallsAround(bot, foot) + wallsAround(bot, head);
           options.push({ foot, head, stand, d, cost: stand.distanceTo(base) + (dy !== 0 ? 3 : 0) - walls * 0.7 });
         }
       }
     }
+  }
+  // Leave room for more beds: prefer the spot that keeps the most other bed spots possible (in a 3x3 room a
+  // bed across the middle of a wall left no space for the spare bed).
+  const k = (p: Vec3): string => `${p.x},${p.y},${p.z}`;
+  for (const o of options) {
+    const used = new Set([k(o.foot), k(o.head)]);
+    const left = options.filter((q) => !used.has(k(q.foot)) && !used.has(k(q.head)) && !used.has(k(q.stand)) && k(q.foot) !== k(o.stand) && k(q.head) !== k(o.stand)).length;
+    o.cost -= Math.min(left, 6) * 1.5;
   }
   options.sort((p, q) => p.cost - q.cost);
   for (const o of options.slice(0, 4)) {
@@ -394,6 +464,11 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
         continue;
       }
     }
+    // Stand exactly in the middle of the cell behind the bed: off-centre, the bot's body overlapped the bed
+    // cell or it faced a bit sideways (the head pointed into a wall) and the server silently refused.
+    await walkStraight(bot, o.stand, 1500).catch(() => false);
+    bot.clearControlStates();
+    await sleep(150);
     await bot.equip(bedItem, 'hand');
     await bot.lookAt(o.head.offset(0.5, 0.2, 0.5), true);
     try {
@@ -417,6 +492,7 @@ export async function placeBedSkill(ctx: SkillContext): Promise<string> {
       return `placed spare bed at ${fmtPos(o.foot)} (left unclaimed for a newborn)`;
     }
   }
+  if (room) ctx.log(`place_bed: ${options.length} options at ${fmtPos(base)}\n${renderRoom(bot, room)}`);
   return options.length ? 'could not place the bed (tried the free spots nearby)' : 'no room for a bed here (needs 2 free floor blocks in a line, plus a spot to stand behind them)';
 }
 
@@ -611,6 +687,9 @@ export async function heatRoomSkill(ctx: SkillContext, max = 6): Promise<string>
     }
   }
   spots.sort((p, q) => q.distanceTo(base) - p.distanceTo(base)); // far (edges/corners) first
+  // Prefer wall torches at head height (keeps the floor free for beds); floor spots only as a fallback.
+  const room = scanRoom(bot, base);
+  if (room) spots.splice(0, spots.length, ...wallTorchSpots(bot, room)); // in a room: wall torches only
   for (const p of spots) {
     if (added >= max) break;
     if (r && (r.comfortable || r.tempC > 28)) break;

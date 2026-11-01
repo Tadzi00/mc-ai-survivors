@@ -5,7 +5,8 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isStandable, isUnderground, v3, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { scanRoom } from '../roomPlan.js';
+import { ALLOWED_DIGS, digKey, countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isStandable, isUnderground, v3, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -200,6 +201,8 @@ async function grabValuableOres(ctx: SkillContext, gathering: string[], skip: Ma
 const badTables = new Set<string>();
 
 /** Why the last ensureCraftingTable call failed (shown to the model), per bot. */
+/** The crafting table this bot placed last (to take it back if it went into a room). */
+const lastPlacedTable = new WeakMap<Bot, { key: string; at: number }>();
 const tableProblem = new WeakMap<Bot, string>();
 
 /** Finds a crafting table within 24 blocks, or crafts+places one. */
@@ -247,6 +250,7 @@ export async function ensureCraftingTable(ctx: SkillContext): Promise<Block | un
     return undefined;
   }
   ctx.memory.setPlace('crafting_table', spot);
+  lastPlacedTable.set(bot, { key: `${spot.x},${spot.y},${spot.z}`, at: Date.now() });
   return bot.blockAt(spot) ?? undefined;
 }
 
@@ -445,7 +449,21 @@ export async function craftSkill(ctx: SkillContext, a: SkillArgsOf<'craft'>): Pr
         made = countItem(bot, item.name) - before;
       }
       if (made <= 0) return `cannot craft ${item.name}: the craft did not go through (nothing was made); try again or move`;
-      return `crafted ${made} ${item.name} (now have ${countItem(bot, item.name)})`;
+      // A table we just put down INSIDE a room takes floor space (a bed did not fit): take it back with us.
+      let tableNote = '';
+      const placed = lastPlacedTable.get(bot);
+      if (table && placed && placed.key === `${table.position.x},${table.position.y},${table.position.z}` && Date.now() - placed.at < 120_000) {
+        const room = scanRoom(bot, bot.entity.position.floored());
+        if (room?.cells.some((c) => c.equals(table!.position))) {
+          ALLOWED_DIGS.add(digKey(table.position));
+          await bot.dig(table, true).catch(() => undefined);
+          await sleep(500);
+          lastPlacedTable.delete(bot);
+          if (ctx.memory.place('crafting_table')?.x === table.position.x) delete ctx.memory.data.places.crafting_table;
+          tableNote = ' (took the crafting table back: it was taking floor space in the room)';
+        }
+      }
+      return `crafted ${made} ${item.name} (now have ${countItem(bot, item.name)})${tableNote}`;
     }
     if (attempt === 0) {
       await autoIntermediates(ctx, item.name);

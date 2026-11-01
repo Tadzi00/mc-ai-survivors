@@ -12,7 +12,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, enableDoorPathing, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, enableDoorPathing, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
@@ -200,6 +200,12 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  /** Steps of the last direct order still to run; when all succeeded the standing order is done. */
+  private orderSteps: { left: number; failed: boolean } | undefined;
+  /** Bumped by every direct order (a plan the model made meanwhile is dropped). */
+  private orderSeq = 0;
+  /** Recent failures per exact action (skill + args), for the "don't repeat it" guard. */
+  private readonly failures = new Map<string, { n: number; at: number; why: string }>();
   /** Set while a skill that builds or repairs on purpose runs (it may dig at home). */
   private allowHomeDig = false;
 
@@ -292,7 +298,8 @@ export class BotAgent {
       // with where it came from.
       const dig = bot.dig.bind(bot);
       bot.dig = (async (block: Block, ...rest: unknown[]) => {
-        const why = block && !this.allowHomeDig ? this.digForbidden(block.position) : false;
+        const once = !!block && ALLOWED_DIGS.delete(digKey(block.position));
+        const why = block && !this.allowHomeDig && !once ? this.digForbidden(block.position) : false;
         if (why) {
           const key = `${block.position.x},${block.position.y},${block.position.z}`;
           const n = (this.refusedDigs.get(key) ?? 0) + 1;
@@ -459,11 +466,16 @@ export class BotAgent {
     log(level, this.name, msg);
   }
 
+  /** The queued steps that come from a player's direct order (they survive re-planning). */
+  private orderStepsOnly(): PlannedAction[] {
+    return this.planQueue.filter((p) => p.thought.startsWith('order from'));
+  }
+
   private wakePlanner(reason: string): void {
     // New information (chat, getting hurt): finish the current step, then re-plan with fresh state.
     if (this.planQueue.length) {
       this.planNote = `plan paused after: ${reason}; remaining steps were ${this.planQueue.map((p) => p.skill).join(', ')}`;
-      this.planQueue = [];
+      this.planQueue = this.orderStepsOnly(); // a player's order keeps going; only the model's own plan pauses
     }
     // Only interrupt passive skills; real work continues.
     if (this.currentSkill === 'wait' || this.currentSkill === 'follow') {
@@ -754,10 +766,15 @@ export class BotAgent {
     if (cmd) {
       reply(cmd.ack);
       // Direct commands: keep the order visible only briefly (in case a step fails); "stop" clears orders.
-      this.order = cmd.steps[0]?.skill === 'wait' ? undefined : { from, text: msg.slice(0, 160), until: Date.now() + 90_000 };
+      // A shortcut covers only part of "build a shelter AND put two beds inside": keep the whole message as a
+      // standing order so the model does the rest after the shortcut ran.
+      const more = /\b(and|then|also|with|plus)\b|,/i.test(msg) && msg.split(/\s+/).length > 4;
+      this.order = cmd.steps[0]?.skill === 'wait' ? undefined : { from, text: msg.slice(0, 160), until: Date.now() + (more ? 15 * 60_000 : 90_000) };
       this.jsonl.write('order', { from, text: msg, steps: cmd.steps.map((s) => s.skill) });
       this.planQueue = cmd.steps.slice(1);
       this.forcedStep = cmd.steps[0];
+      this.orderSeq++;
+      this.orderSteps = { left: cmd.steps.length, failed: false };
       if (this.skillAbort && this.currentSkill && !this.reflexBusy) {
         this.interruptedBy = `order from ${from}`;
         this.skillAbort.abort();
@@ -1140,6 +1157,21 @@ export class BotAgent {
     }
     this.log('debug', `reflex ${choice}: ${result}`);
     this.jsonl.write('reflex', { reflex: choice, result, ms: Date.now() - started });
+    // Tell the model what the reflex did and where that left the bot (it only knew "interrupted (warm_home)"
+    // and then e.g. planned another shelter next to the finished one).
+    const bot = this.bot;
+    if (bot?.entity && result && result !== 'aborted') {
+      const here = bot.entity.position.floored();
+      const room = scanRoom(bot, here);
+      const home = this.memory.place('home');
+      const atHome = !!home && !!room && room.cells.some((c) => Math.abs(c.x - home.x) <= 1 && Math.abs(c.z - home.z) <= 1);
+      const where = atHome ? 'inside your home' : room ? 'inside a room' : 'outdoors';
+      const line = `[reflex] ${choice}: ${result.slice(0, 140)} - now at ${fmtPos(here)}, ${where}`;
+      const last = this.recentResults[this.recentResults.length - 1];
+      if (!last?.startsWith(`[reflex] ${choice}:`)) this.recentResults.push(line);
+      else this.recentResults[this.recentResults.length - 1] = line; // repeated reflex: keep only the latest
+      while (this.recentResults.length > 6) this.recentResults.shift();
+    }
   }
 
   private async runReflex(r: Reflex, hostile: Entity | undefined, signal: AbortSignal): Promise<string> {
@@ -1305,7 +1337,10 @@ export class BotAgent {
         this.lastPlanAt = Date.now();
         try {
           this.planningSince = Date.now();
+          const seq = this.orderSeq;
           const steps = await this.plan();
+          // A player's order arrived while the model was thinking: its steps win, drop this plan.
+          if (this.orderSeq !== seq) continue;
           // Dug in for the night while the model was thinking: that plan is for outside, drop it.
           if (this.bunker && (this.bot?.time.timeOfDay ?? 0) >= 12_000) {
             this.planQueue = [];
@@ -1325,7 +1360,7 @@ export class BotAgent {
       const { result, interrupted } = await this.execute(action);
       if (this.planQueue.length && (interrupted || looksFailed(result))) {
         this.planNote = `plan stopped: step "${action.skill}" ${interrupted ? 'was interrupted' : 'failed'} (${result.slice(0, 120)}); dropped: ${this.planQueue.map((p) => p.skill).join(', ')}`;
-        this.planQueue = [];
+        this.planQueue = this.orderStepsOnly();
       }
     }
   }
@@ -1416,6 +1451,15 @@ export class BotAgent {
   }
 
   private async execute(action: PlannedAction): Promise<{ result: string; interrupted: boolean }> {
+    // The same action failed twice in the last 5 minutes: don't burn another minute on it (the model kept
+    // asking for "gather log" on a treeless plain 10+ times). Player orders always run.
+    const fkey = `${action.skill} ${JSON.stringify(action.args)}`;
+    const prev = this.failures.get(fkey);
+    if (prev && prev.n >= 2 && Date.now() - prev.at < 300_000 && !action.thought.startsWith('order from')) {
+      const result = `SKIPPED: ${fkey} already failed ${prev.n} times in the last minutes (${prev.why.slice(0, 120)}). Do something different.`;
+      this.log('info', result);
+      return { result, interrupted: false };
+    }
     const ac = new AbortController();
     this.skillAbort = ac;
     this.currentSkill = action.skill;
@@ -1466,6 +1510,22 @@ export class BotAgent {
     const delta = this.inventoryDelta(invBefore);
     if (delta && !result.includes(delta)) result = `${result}; inventory ${delta}`;
     const line = `${action.skill}(${JSON.stringify(action.args)}) -> ${result}`;
+    // A direct order whose steps all succeeded is finished: clear it, or the model keeps redoing it
+    // ("build a shelter ..." stayed on screen and the bot built shelter after shelter).
+    if (this.orderSteps && action.thought.startsWith('order from') && !/will resume the order/.test(result)) {
+      this.orderSteps.left--;
+      if (looksFailed(result)) this.orderSteps.failed = true;
+      if (this.orderSteps.left <= 0) {
+        if (!this.orderSteps.failed) this.order = undefined;
+        this.orderSteps = undefined;
+      }
+    }
+    if (looksFailed(result) && !/^interrupted/.test(result)) {
+      const f = this.failures.get(fkey);
+      this.failures.set(fkey, { n: f && Date.now() - f.at < 300_000 ? f.n + 1 : 1, at: Date.now(), why: result });
+    } else if (!looksFailed(result)) {
+      this.failures.delete(fkey);
+    }
     this.recentResults.push(line.slice(0, 300));
     while (this.recentResults.length > 6) this.recentResults.shift();
     this.log('info', `  => ${result}`);
