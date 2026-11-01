@@ -5,7 +5,7 @@ import { findBlocks, fmtPos, HOSTILE_MOBS, isUnderground } from '../skills/helpe
 import { compass, distance, formatHeard, type HeardMessage } from './chat.js';
 import { cleanLesson, LESSON_CAP, type Memory } from './memory.js';
 import type { Village } from './village.js';
-import { buildingContents, renderRoom, scanRoom } from '../skills/roomPlan.js';
+import { buildingContents, renderRoom, scanRoom, shelterCheck } from '../skills/roomPlan.js';
 import { readBookItem } from '../skills/bookText.js';
 import { progressText } from './progress.js';
 
@@ -188,7 +188,11 @@ export function buildObservation(o: ObservationInput): string {
     .filter(Boolean);
   if (books.length) lines.push(`Books you carry: ${books.join('; ')}.`);
   const room = scanRoom(bot, me.floored());
-  if (room) lines.push(renderRoom(bot, room));
+  if (room) {
+    lines.push(renderRoom(bot, room));
+    const sc = shelterCheck(bot, room);
+    lines.push(sc.ok ? `  This room COUNTS AS A SHELTER (${sc.why}): beds, chests and tables can go here.` : `  Not a shelter yet: ${sc.why} (needs walls, roof, 3 blocks of headroom and a torch).`);
+  }
   const disc = [...(memory.data.discoveries ?? [])]
     .map((d) => ({ d, dist: distance(me, d) }))
     .sort((a, b) => a.dist - b.dist)

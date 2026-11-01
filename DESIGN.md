@@ -571,6 +571,11 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
   `plotsNextTo`). A new shelter only becomes "home" if the bot has none in the village; `set_home` refuses
   spots outside the village when the current home is inside. A home room the bot stands in (also a
   player-built one) is added as a building (`villageTick`, from the room scan).
+- **Any lit room is a shelter** (`shelterCheck`): walls + roof (room scan), 3+ blocks of headroom on every
+  floor cell, a torch/lantern/campfire inside. `adoptShelters` (village tick) scans rooms around lights
+  within 24 blocks and the room the bot stands in, adds them to the village (`owner: "found"`), and a bot
+  without a real home (none, or just an outdoor spot) moves into the one it stands in or the nearest. The
+  observation says whether the current room counts as a shelter and why not.
 - **Room plans** (`skills/roomPlan.ts`): a floor-level flood fill from the bot's feet (doors are boundaries,
   furniture is inside, a cell under open sky = outdoors). The observation shows an ASCII top view (# wall,
   D door, + doorway, B/T/C/F/t furniture) and the best free spots (against walls, not the doorway). Every

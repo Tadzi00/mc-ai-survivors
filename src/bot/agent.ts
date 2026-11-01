@@ -12,7 +12,7 @@ import type { LLMRegistry } from '../llm/factory.js';
 import type { ChatMessage } from '../llm/types.js';
 import type { SeasonsApi } from '../rcon/server.js';
 import type { SkillContext } from '../skills/context.js';
-import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, walkStraight, emergencyHut, leaveHut, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
+import { countItem, digBunker, findBlocks, fmtPos, goSurface, gotoNear, gotoXZ, HOSTILE_MOBS, isTreeLog, isSolid, MAN_MADE_RE, ManMadeIndex, LavaIndex, enableDoorPathing, walkStraight, emergencyHut, leaveHut, ALLOWED_DIGS, digKey, nearManMade, v3, type Vec3 } from '../skills/helpers.js';
 import { doorDigPenalty } from './doors.js';
 import { runSkill } from '../skills/index.js';
 import { attackSkill, eatSkill, sleepSkill } from '../skills/impl/survival.js';
@@ -29,7 +29,7 @@ import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
 import { LESSON_CAP, Memory } from './memory.js';
 import { Village } from './village.js';
-import { scanRoom } from '../skills/roomPlan.js';
+import { scanRoom, shelterCheck } from '../skills/roomPlan.js';
 import { readBookItem } from '../skills/bookText.js';
 import { relevantKnowledge } from './knowledge.js';
 import { answerFrom, askedFor, cleanBotName, isChatter, kindFromNews, saidRecently, topLessons, whatToShare } from './society.js';
@@ -220,6 +220,7 @@ export class BotAgent {
     if (vc && vc.founder === this.name) this.news(`Village founded at ${vc.x} ${vc.y} ${vc.z}. Come live here!`, 'village-founded');
     const mine = this.memory.place('village');
     if (v.center && (!mine || mine.x !== v.center.x || mine.z !== v.center.z)) this.memory.setPlace('village', { ...v.center, note: 'the village' });
+    this.adoptShelters();
     if (!home || v.buildingAt(home)) return;
     const me = bot.entity.position.floored();
     if (Math.hypot(me.x - home.x, me.z - home.z) > 6) return;
@@ -227,6 +228,55 @@ export class BotAgent {
     if (!room || !room.cells.some((c) => Math.abs(c.x - home.x) <= 1 && Math.abs(c.z - home.z) <= 1)) return;
     v.addBuilding({ x0: room.x0 - 1, z0: room.z0 - 1, x1: room.x1 + 1, z1: room.z1 + 1, y0: room.y, door: room.doors[0], owner: this.name });
     this.log('info', `village: added my home room ${room.x0 - 1},${room.z0 - 1}..${room.x1 + 1},${room.z1 + 1}`);
+  }
+
+  /**
+   * Any building with walls, a roof, 3+ blocks of headroom and a light inside counts as a shelter, also one a
+   * player built. Lit rooms near us (found by their torches) are added to the village; a bot without a real
+   * home moves into the one it stands in (or the nearest), so beds etc. can go there.
+   */
+  private adoptShelters(): void {
+    const bot = this.bot;
+    const v = this.deps.village;
+    if (!bot?.entity || !v) return;
+    const me = bot.entity.position.floored();
+    const lights = bot.findBlocks({ matching: (b) => /torch|lantern|campfire/.test(b.name), maxDistance: 24, count: 30 });
+    const seen = new Set<string>();
+    const found: Array<{ room: NonNullable<ReturnType<typeof scanRoom>>; center: Vec3 }> = [];
+    // the room we are in, plus rooms around each light (floor torch: its own cell; wall torch: next to it)
+    const starts: Vec3[] = [me];
+    for (const l of lights) {
+      starts.push(l);
+      for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(0, -1, 0)]) starts.push(l.plus(d));
+    }
+    for (const st of starts) {
+      // the floor level: go down to the first cell standing on something
+      let f = st;
+      for (let k = 0; k < 3 && f && !isSolid(bot.blockAt(f.offset(0, -1, 0))); k++) f = f.offset(0, -1, 0);
+      const b = bot.blockAt(f);
+      if (!b || b.boundingBox === 'block' || seen.has(`${f.x},${f.y},${f.z}`)) continue;
+      const room = scanRoom(bot, f);
+      if (!room) continue;
+      for (const c of room.cells) seen.add(`${c.x},${c.y},${c.z}`);
+      if (!shelterCheck(bot, room).ok) continue;
+      const cx = Math.round((room.x0 + room.x1) / 2), cz = Math.round((room.z0 + room.z1) / 2);
+      const center = room.cells.reduce((best, c) => (Math.hypot(c.x - cx, c.z - cz) < Math.hypot(best.x - cx, best.z - cz) ? c : best), room.cells[0]!);
+      found.push({ room, center });
+      if (!v.buildingAt(center)) {
+        v.addBuilding({ x0: room.x0 - 1, z0: room.z0 - 1, x1: room.x1 + 1, z1: room.z1 + 1, y0: room.y, door: room.doors[0], owner: 'found' });
+        this.log('info', `village: found a shelter (lit room) at ${fmtPos(center)}`);
+        this.memory.discover('shelter (lit room)', center);
+      }
+    }
+    // no home, or a "home" that is just a spot outdoors: move into a shelter
+    const home = this.memory.place('home');
+    const homeIsRoom = !!home && !!scanRoom(bot, v3(home.x, home.y, home.z)) || (!!home && !bot.blockAt(v3(home.x, home.y, home.z)));
+    if (found.length && !homeIsRoom) {
+      const mine = found.find((f) => f.room.cells.some((c) => c.equals(me))) ?? found.sort((a, b) => a.center.distanceTo(me) - b.center.distanceTo(me))[0]!;
+      this.memory.setPlace('home', { ...mine.center, note: 'a shelter I found' });
+      this.memory.learn(`My home is the shelter at ${fmtPos(mine.center)} (walls, roof, torch): beds go inside`);
+      this.log('info', `moved into the shelter at ${fmtPos(mine.center)}`);
+    }
   }
 
   /** Player's standing order; persisted in memory so a restart doesn't forget it. */

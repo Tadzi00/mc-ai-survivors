@@ -166,3 +166,36 @@ export function wallTorchSpots(bot: Bot, room: RoomInfo): Vec3[] {
     .filter((h) => isEmptyCell(bot.blockAt(h)) && wallsAround(bot, h) >= 1 && !isKeepClear(bot, h))
     .sort((a, b) => wallsAround(bot, b) - wallsAround(bot, a));
 }
+
+/** Light sources that make a room count as a (warm) shelter. */
+const LIGHT = /torch|lantern|campfire|glowstone|sea_lantern|shroomlight|jack_o_lantern/;
+
+/**
+ * Does this room count as a shelter? Walls and a roof (the room scan already needs both), headroom of at
+ * least 3 blocks on every floor cell (walls at least 3 high), and a torch or other light inside. Any such
+ * building counts - also one a player built - so bots can live in it and put their beds there.
+ */
+export function shelterCheck(bot: Bot, room: RoomInfo): { ok: boolean; why: string } {
+  if (room.cells.length < 2) return { ok: false, why: 'too small' };
+  const solid = (p: Vec3): boolean => {
+    const b = bot.blockAt(p);
+    return !!b && b.boundingBox === 'block' && !FURNITURE.test(b.name);
+  };
+  const low = room.cells.filter((c) => solid(c.offset(0, 1, 0)) || solid(c.offset(0, 2, 0)));
+  if (low.length) return { ok: false, why: `ceiling lower than 3 blocks over ${low.length} floor cell(s)` };
+  let light = false;
+  for (const c of room.cells) {
+    for (let dy = 0; dy <= 2 && !light; dy++) {
+      const here = bot.blockAt(c.offset(0, dy, 0));
+      if (here && LIGHT.test(here.name)) light = true;
+      // wall torches hang on the walls next to the cell
+      for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) {
+        const w = bot.blockAt(c.offset(d.x, dy, d.z));
+        if (w && LIGHT.test(w.name)) light = true;
+      }
+    }
+    if (light) break;
+  }
+  if (!light) return { ok: false, why: 'no torch or other light inside' };
+  return { ok: true, why: `${room.cells.length} floor cells, 3+ blocks high, lit${room.doors.length ? ', with a door' : ''}` };
+}

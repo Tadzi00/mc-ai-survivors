@@ -100,6 +100,35 @@ const scenarios = {
     return { ok: dead && survived, why: `husk killed=${dead}, bot alive=${survived}` };
   },
 
+  /** A player-built lit room (3 high, torch) counts as a shelter: the bot moves in and its bed goes inside. A 2-high room does not. */
+  async found_shelter() {
+    // 3-high room: floor Y-1, walls Y..Y+2, roof Y+3, door south, wall torch inside
+    await cmd(`fill ${X - 2} ${Y - 1} ${Z - 2} ${X + 2} ${Y + 3} ${Z + 2} minecraft:spruce_planks hollow`);
+    await cmd(`setblock ${X} ${Y} ${Z + 2} minecraft:oak_door[half=lower,facing=south]`);
+    await cmd(`setblock ${X} ${Y + 1} ${Z + 2} minecraft:oak_door[half=upper,facing=south]`);
+    await cmd(`setblock ${X - 1} ${Y + 1} ${Z - 1} minecraft:wall_torch[facing=east]`);
+    // a low room (2 high) with a torch next to it: not a shelter
+    await cmd(`fill ${X + 6} ${Y - 1} ${Z - 2} ${X + 10} ${Y + 2} ${Z + 2} minecraft:spruce_planks hollow`);
+    await cmd(`setblock ${X + 8} ${Y} ${Z} minecraft:torch`);
+    const [a] = await startAgents([{ name: 'TestA_found', x: X, z: Z }]);
+    await cmd(`give TestA_found minecraft:white_bed 1`);
+    let home;
+    for (let i = 0; i < 30 && !home; i++) {
+      await sleep(1000);
+      const h = a.memory.place('home');
+      if (h && Math.abs(h.x - X) <= 1 && Math.abs(h.z - Z) <= 1) home = h;
+    }
+    a.queueFirst({ skill: 'place_bed', args: {}, thought: 'order from test' });
+    let bedInside = false;
+    for (let i = 0; i < 20 && !bedInside; i++) {
+      await sleep(1000);
+      for (let x = X - 1; x <= X + 1; x++) for (let z = Z - 1; z <= Z + 1; z++) if (/passed/i.test(await cmd(`execute if block ${x} ${Y} ${z} #minecraft:beds`))) bedInside = true;
+    }
+    const lowCounted = a.deps.village.data.buildings.some((b) => b.x0 <= X + 8 && b.x1 >= X + 8);
+    await stopAgents([a]);
+    return { ok: !!home && bedInside && !lowCounted, why: `home=${JSON.stringify(home)} bed inside=${bedInside} low room counted=${lowCounted}` };
+  },
+
   /** A bot with only a WOODEN sword against a husk: does it hit at all? */
   async fight_wooden() {
     const [a] = await startAgents([{ name: 'TestA_wood', x: X, z: Z }]);
