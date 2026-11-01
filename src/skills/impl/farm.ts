@@ -2,7 +2,7 @@ import { sleep, throwIfAborted } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
 import { countItem, findBlocks, findItem, fmtPos, gotoNear, isAirLike, isEmptyCell, isStandable, placeItemAt, v3, walkStraight, type Vec3 } from '../helpers.js';
-import { bestFieldSite } from '../fieldPlan.js';
+import { bestFieldSite, wetTiles } from '../fieldPlan.js';
 import { craftSkill, gatherSkill } from './resources.js';
 
 /** Ground a hoe turns into farmland, and shore ground we replace with dirt first. */
@@ -221,6 +221,22 @@ async function tendField(ctx: SkillContext): Promise<string> {
   // replant every empty farmland of the field
   const empty = findBlocks(bot, ['farmland'], 12, 80).filter((b) => near(b.position) && bot.blockAt(b.position.offset(0, 1, 0))?.name === 'air');
   const replanted = await tillAndPlant(ctx, empty.map((b) => b.position));
+  // A tiny field (a failed setup left one plant) feeds nobody: grow it to ~24 around the same water.
+  let grown = 0;
+  const plants = (): number => findBlocks(bot, ['wheat'], 12, 80).filter((b) => near(b.position)).length;
+  if (plants() < 16) {
+    if (countItem(bot, 'wheat_seeds') < 8) await collectSeeds(ctx, 12);
+    const soilIds = new Set([...TILLABLE, ...SWAPPABLE].map((n) => bot.registry.blocksByName[n]?.id).filter((x): x is number => x !== undefined));
+    const soil = bot
+      .findBlocks({ matching: (b) => soilIds.has(b.type), maxDistance: 12, count: 300, point: v3(f.x, f.y, f.z) })
+      .filter((p) => isEmptyCell(bot.blockAt(p.offset(0, 1, 0))));
+    const extra = wetTiles({ x: f.x, y: f.y, z: f.z }, soil)
+      .sort((a, b) => Math.hypot(a.x - f.x, a.z - f.z) - Math.hypot(b.x - f.x, b.z - f.z))
+      .slice(0, Math.max(0, 24 - plants()));
+    const short = extra.filter((t) => !TILLABLE.includes(bot.blockAt(v3(t.x, t.y, t.z))?.name ?? '') && !DROPS_DIRT.includes(bot.blockAt(v3(t.x, t.y, t.z))?.name ?? '')).length - countItem(bot, 'dirt');
+    if (short > 0) await gatherSkill(ctx, { block: 'dirt', count: Math.min(short + 2, 24) }).catch(() => '');
+    grown = await tillAndPlant(ctx, extra.slice(0, countItem(bot, 'wheat_seeds')));
+  }
   let bread = '';
   if (countItem(bot, 'wheat') >= 3) {
     const r = await craftSkill(ctx, { item: 'bread', count: Math.floor(countItem(bot, 'wheat') / 3) });
@@ -228,7 +244,7 @@ async function tendField(ctx: SkillContext): Promise<string> {
   }
   const growing = findBlocks(bot, ['wheat'], 12, 80).filter((b) => near(b.position)).length;
   ctx.village?.tendedField();
-  return `field at ${fmtPos(f)}: harvested ${harvested}, replanted ${replanted}, ${growing} growing${bread}`;
+  return `field at ${fmtPos(f)}: harvested ${harvested}, replanted ${replanted}${grown ? `, made it bigger (+${grown})` : ''}, ${growing} growing${bread}`;
 }
 
 export async function farmSkill(ctx: SkillContext, a: SkillArgsOf<'farm'>): Promise<string> {

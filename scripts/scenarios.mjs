@@ -476,6 +476,24 @@ export const scenarios = {
     return ok(planted >= 4 && field?.planted > 0, `${r.slice(0, 150)} | planted=${planted} field=${JSON.stringify(field ?? null).slice(0, 60)}`);
   },
 
+  // A field with a single plant (left by a failed setup): tend grows it.
+  async field_grow(ctx, P) {
+    const { X, Y, Z } = P;
+    const cx = X + 6;
+    await P.cmd(`fill ${cx - 4} ${Y - 1} ${Z - 4} ${cx + 4} ${Y - 1} ${Z + 4} minecraft:grass_block`);
+    await P.cmd(`setblock ${cx} ${Y - 1} ${Z} minecraft:water`);
+    await P.cmd(`setblock ${cx + 1} ${Y - 1} ${Z} minecraft:farmland`);
+    await P.cmd(`setblock ${cx + 1} ${Y} ${Z} minecraft:wheat`);
+    ctx.village.setField({ x: cx, y: Y - 1, z: Z }, 1);
+    await P.give('wheat_seeds', 14);
+    await P.give('wooden_hoe', 1);
+    await P.sleep(1500);
+    const r = await farmSkill(ctx, { action: 'tend', crop: 'wheat' });
+    let plants = 0;
+    for (let x = cx - 4; x <= cx + 4; x++) for (let z = Z - 4; z <= Z + 4; z++) if (await isBlock(P, x, Y, z, 'minecraft:wheat')) plants++;
+    return ok(plants >= 10, `${r} | plants=${plants}`);
+  },
+
   async farm(ctx, P) {
     await P.cmd(`fill ${P.X - 3} ${P.Y - 1} ${P.Z - 3} ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:dirt`);
     await P.cmd(`setblock ${P.X + 3} ${P.Y - 1} ${P.Z + 3} minecraft:water`);
