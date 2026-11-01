@@ -189,7 +189,8 @@ export async function placeItemAt(ctx: SkillContext, item: Item, pos: Vec3): Pro
   const { bot } = ctx;
   throwIfAborted(ctx.signal);
   const target = bot.blockAt(pos);
-  if (!target || !isAirLike(target)) return false;
+  // Air, or a liquid: blocks can be placed into water/lava (walling in next to a lake left 4 gaps).
+  if (!target || !(isAirLike(target) || /^(water|lava|bubble_column)$/.test(target.name))) return false;
   // Don't place inside our own body.
   const feet = bot.entity.position.floored();
   if (pos.equals(feet) || pos.equals(feet.offset(0, 1, 0))) return false;
@@ -694,8 +695,10 @@ export async function leaveHut(ctx: SkillContext, feet: Vec3): Promise<string> {
         await bot.dig(b, true).catch(() => undefined);
       }
     }
+    await sleep(300); // let the server confirm the opening before walking into it
     await walkStraight(bot, beyond, 2500).catch(() => false);
-    return `stepped out of the emergency hut at ${fmtPos(feet)}`;
+    if (bot.entity.position.floored().distanceTo(feet) < 1.5) await gotoNear(ctx, beyond.x, beyond.y, beyond.z, 0, 8_000).catch(() => undefined);
+    return bot.entity.position.floored().distanceTo(feet) >= 1.5 ? `stepped out of the emergency hut at ${fmtPos(feet)}` : 'could not get out of the hut';
   }
   return goSurface(ctx);
 }

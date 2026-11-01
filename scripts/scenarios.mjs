@@ -489,6 +489,9 @@ export const scenarios = {
       if (await isBlock(P, f.x + dx, f.y + dy, f.z + dz, 'minecraft:air')) gaps++;
     }
     const out = r.feet ? await leaveHut(ctx, r.feet) : 'no hut';
+    let open = 0;
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) if (await isBlock(P, f.x + dx, f.y, f.z + dz, 'minecraft:air')) open++;
+    ctx.log(`after leaving: open sides at feet=${open} pos=${ctx.bot.entity.position}`);
     const moved = ctx.bot.entity.position.floored().distanceTo(f) >= 1.5;
     return ok(!!r.feet && gaps === 0 && moved, `${r.why} | gaps=${gaps} | ${out} | moved out=${moved}`);
   },

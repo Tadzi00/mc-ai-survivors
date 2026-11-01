@@ -41,8 +41,16 @@ function targetCost(bot: Bot, b: Block, feetY: number): number {
   return bot.entity.position.distanceTo(p) + 4 * Math.max(0, p.y - feetY - 2) + (standNext ? 0 : 12);
 }
 
+/** Things that are made, not found: "gather torch" searched the world for placed torches. */
+const CRAFTED_ONLY = /^(torch(es)?|planks?|.*_planks|sticks?|crafting_table|furnace|chest|.*_bed|bed|.*_door|door|ladder|bread|charcoal|book|paper|.*_pickaxe|.*_sword|.*_axe|.*_shovel|.*_hoe)$/;
+
 export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): Promise<string> {
   const { bot } = ctx;
+  const q = a.block.toLowerCase().replace(/^minecraft:/, '');
+  if (CRAFTED_ONLY.test(q)) {
+    const r = await craftSkill(ctx, { item: q.replace(/es$/, '').replace(/^planks?$/, 'planks').replace(/^sticks$/, 'stick'), count: Math.min(a.count, 16) });
+    return `${q} is made, not found (use craft): ${r}`;
+  }
   const names = resolveBlockNames(bot, a.block);
   if (names.length === 0) return `unknown block "${a.block}"`;
   const dropRes = names.map(dropNameFor);

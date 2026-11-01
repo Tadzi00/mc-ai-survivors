@@ -219,6 +219,7 @@ export class BotAgent {
     this.memory.setOrder(o);
   }
   private lastConclusionAt = 0;
+  private lastHurtAt = 0;
   private readonly lastGift = new Map<string, number>();
   private currentReflex: Reflex | undefined;
   private reflexAbort: AbortController | undefined;
@@ -468,6 +469,7 @@ export class BotAgent {
     });
     bot.on('health', () => {
       if (bot.health < this.lastHealth - 0.5) {
+        this.lastHurtAt = Date.now();
         this.wakePlanner(this.temp?.stage === 'HYPOTHERMIA' ? 'freezing damage' : 'hurt');
         this.maybeCallForHelp();
       }
@@ -1517,7 +1519,10 @@ export class BotAgent {
       }
     }
     if (!this.running || this.reflexBusy || !this.bot?.entity) return;
-    const hostile = this.nearestHostile();
+    // In our sealed night hole nothing can reach us: ignore monsters around unless we are actually being hurt
+    // (a bot climbed out to fight a zombie it could not even reach, and died).
+    const inHole = !!this.bunker && this.bot.entity.position.distanceTo(this.bunker.offset(0.5, 0, 0.5)) <= 1.5;
+    const hostile = inHole && Date.now() - this.lastHurtAt > 3_000 ? undefined : this.nearestHostile();
     const choice = chooseReflex(this.reflexState(hostile));
     if (!choice) return;
     const cd = REFLEX_COOLDOWN_MS[choice];
@@ -1746,6 +1751,15 @@ export class BotAgent {
         continue;
       }
       let action: PlannedAction;
+      // Dug in for the night: steps from orders/teaching that would walk out wait until morning.
+      if (inBunkerAtNight && this.forcedStep && !BUNKER_SAFE_SKILLS.has(this.forcedStep.skill)) {
+        await sleep(1000);
+        continue;
+      }
+      if (inBunkerAtNight && !this.forcedStep && this.planQueue.length && !BUNKER_SAFE_SKILLS.has(this.planQueue[0]!.skill)) {
+        await sleep(1000);
+        continue;
+      }
       if (this.forcedStep) {
         action = this.forcedStep;
         this.forcedStep = undefined;
