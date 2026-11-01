@@ -26,7 +26,7 @@ import { addLesson, cleanLesson, isLessonWorthy, lessonFrom, parseChestReport } 
 import { looksLikeOrder, parseDirectCommand } from './orders.js';
 import { classifyChat } from './chat.js';
 import { ChatLog, HomeRegistry, ProtectedAreas, Roster } from './chat.js';
-import { Memory } from './memory.js';
+import { LESSON_CAP, Memory } from './memory.js';
 import { buildObservation, fitObservation, inventorySummary } from './observation.js';
 import { retryPrompt, systemPrompt } from './prompts.js';
 import { chooseReflex, type Reflex, type ReflexState } from './reflexChoice.js';
@@ -601,13 +601,64 @@ export class BotAgent {
       reply(`Got it, I'll remember: ${fact}`);
       return;
     }
+    // Long answers are sent a line every 0.4 s (the server kicks for chat spam) and capped at 16 lines.
+    const replyLines = (lines: string[]): void => {
+      const out = lines.flatMap((l) => l.match(/.{1,230}(\s|$)/g)?.map((x) => x.trim()) ?? [l]).slice(0, 16);
+      out.forEach((l, i) => setTimeout(() => this.bot?.whisper(from, l), i * 400));
+    };
+    if (/^!lessons?\b/i.test(msg)) {
+      const ls = this.memory.data.lessons ?? [];
+      replyLines(ls.length ? [`Lessons ${ls.length}/${LESSON_CAP} (!forget <number> drops one):`, ...ls.map((l, i) => `[${i + 1}] ${l}`)] : ['I have no lessons yet.']);
+      return;
+    }
+    const finds = /^!finds?\b\s*(.*)$/i.exec(msg);
+    if (finds) {
+      const me = bot.entity.position;
+      const kind = finds[1]!.trim().toLowerCase();
+      const list = (this.memory.data.discoveries ?? [])
+        .filter((d) => !kind || d.what.toLowerCase().includes(kind))
+        .map((d) => ({ d, dist: Math.hypot(d.x - me.x, d.z - me.z) }))
+        .sort((a, b) => a.dist - b.dist);
+      replyLines(
+        list.length
+          ? [`${list.length} finds${kind ? ` matching "${kind}"` : ''}, nearest first:`, ...list.slice(0, 14).map(({ d, dist }) => `${d.what} ${d.x},${d.y},${d.z} (${Math.round(dist)}m)`)]
+          : [`No finds${kind ? ` matching "${kind}"` : ''}.`],
+      );
+      return;
+    }
+    if (/^!(memory|mem)\b/i.test(msg)) {
+      const d = this.memory.data;
+      const lines: string[] = [];
+      const places = Object.entries(d.places).map(([k, p]) => `${k} ${p.x},${p.y},${p.z}`);
+      lines.push(`Places: ${places.join('; ') || 'none'}`);
+      if (d.goal) lines.push(`Goal: ${d.goal}`);
+      if (d.order && d.order.until > Date.now()) lines.push(`Order from ${d.order.from} (${Math.round((d.order.until - Date.now()) / 60_000)} min left): ${d.order.text}`);
+      for (const c of Object.values(d.storage ?? {}).slice(0, 4)) {
+        const items = Object.entries(c.items).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ');
+        lines.push(`Chest ${c.x},${c.y},${c.z} (per ${c.by}): ${items || 'empty'}`);
+      }
+      const kinds = new Map<string, number>();
+      for (const x of d.discoveries ?? []) kinds.set(x.what.split(':')[0]!, (kinds.get(x.what.split(':')[0]!) ?? 0) + 1);
+      lines.push(`Finds (${(d.discoveries ?? []).length}): ${[...kinds].map(([k, n]) => `${k} x${n}`).join(', ') || 'none'} - !finds <kind> for spots`);
+      lines.push(`Lessons: ${(d.lessons ?? []).length}/${LESSON_CAP} - !lessons to read them`);
+      if (d.shelters?.length) lines.push(`Shelters built: ${d.shelters.length}`);
+      if (d.notes.length) lines.push(`Notes: ${d.notes.slice(-3).join(' | ')}`);
+      replyLines(lines);
+      return;
+    }
+    const fNum = /^!forget\s+#?\[?(\d+)\]?\s*$/i.exec(msg);
+    if (fNum) {
+      const gone = this.memory.forgetLesson(Number(fNum[1]));
+      reply(gone ? `Forgot lesson [${fNum[1]}]: ${gone}` : `No lesson [${fNum[1]}] (see !lessons).`);
+      return;
+    }
     const f = /^!forget\s+(.+)$/i.exec(msg);
     if (f) {
       reply(this.forgetAbout(f[1]!.trim(), true));
       return;
     }
     if (/^!/.test(msg)) {
-      reply('Commands: !think, !status, !home (here becomes my home), !teach <fact>, !forget <text>. Anything else is a message to me.');
+      reply('Commands: !think, !status, !memory, !lessons, !finds [kind], !home (here becomes my home), !teach <fact>, !forget <text or lesson number>. Anything else is a message to me.');
       return;
     }
     this.chat.offerDirect(from, msg);

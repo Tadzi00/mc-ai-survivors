@@ -188,6 +188,8 @@ sharing. **Why:** the user wants knowledge to spread through conversation, not t
 Humans (not bots) can `/msg <bot> ...`:
 - `!think`: last thought, current action, remaining plan, goal, rescue target.
 - `!status`: health, food, position, tier, inventory.
+- `!memory`, `!lessons`, `!finds [kind]`: read the bot's memory file. Long answers are whispered one line
+  per 0.4 s and capped at 16 lines (the server kicks for chat spam). `!forget <n>` drops lesson [n].
 - Orders (`src/bot/orders.ts`): "build shelter/house", "stop/wait", "come here/follow me", "go home", "sleep",
   "eat" run immediately as skills, no model call (the reply is a short whispered ack). Any other message
   that reads like an instruction (imperative verb, not a question) becomes a standing ORDER shown first in
