@@ -701,6 +701,25 @@ export class BotAgent {
     for (const part of text.match(/.{1,230}(\s|$)/g) ?? [text]) this.bot?.whisper(student.name, part.trim());
   }
 
+  private inventoryCounts(): Map<string, number> {
+    const m = new Map<string, number>();
+    for (const i of this.bot?.inventory.items() ?? []) m.set(i.name, (m.get(i.name) ?? 0) + i.count);
+    return m;
+  }
+
+  /** "+14 jungle_log, -4 oak_planks" (top 5 changes), or '' if nothing changed. */
+  private inventoryDelta(before: Map<string, number>): string {
+    const after = this.inventoryCounts();
+    const names = new Set([...before.keys(), ...after.keys()]);
+    const changes: Array<[string, number]> = [];
+    for (const n of names) {
+      const d = (after.get(n) ?? 0) - (before.get(n) ?? 0);
+      if (d !== 0) changes.push([n, d]);
+    }
+    changes.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    return changes.slice(0, 5).map(([n, d]) => `${d > 0 ? '+' : ''}${d} ${n}`).join(', ');
+  }
+
   /** Snapshot for state/status.json (what this bot is up to right now). */
   status(): Record<string, unknown> {
     const bot = this.bot;
@@ -1222,6 +1241,7 @@ export class BotAgent {
     const timer = setTimeout(() => ac.abort(new TimeoutError()), timeoutMs);
     const started = Date.now();
     let result: string;
+    const invBefore = this.inventoryCounts();
     this.log('info', `${action.skill} ${JSON.stringify(action.args)} — ${action.thought}`);
     try {
       // Hard stop: even if a skill ignores its abort signal, the bot moves on shortly after the timeout.
@@ -1251,6 +1271,9 @@ export class BotAgent {
       this.skillAbort = undefined;
       this.currentSkill = undefined;
     }
+    // Tell the model what really changed (a gather that "timed out" may still have collected a lot).
+    const delta = this.inventoryDelta(invBefore);
+    if (delta && !result.includes(delta)) result = `${result}; inventory ${delta}`;
     const line = `${action.skill}(${JSON.stringify(action.args)}) -> ${result}`;
     this.recentResults.push(line.slice(0, 300));
     while (this.recentResults.length > 6) this.recentResults.shift();
