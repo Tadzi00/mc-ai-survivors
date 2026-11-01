@@ -86,19 +86,29 @@ async function setupField(ctx: SkillContext): Promise<string> {
   ctx.memory.setPlace('field', { x: w.x, y: w.y, z: w.z, note: `wheat field (${tilled} planted)` });
   return tilled
     ? `made the village wheat field by the water at ${fmtPos(w)}: ${tilled} seeds planted. Wheat ripens in ~30-60 min; then farm {"action":"tend"} harvests, replants and bakes bread`
-    : 'could not till or plant the field';
+    : `could not till or plant the field (tried ${lastTill.tried} tiles, reached ${lastTill.reached}, tilled ${lastTill.tilled}${lastTill.why ? `; ${lastTill.why}` : ''})`;
 }
+
+/** What the last tillAndPlant did (for a useful message when nothing got planted). */
+let lastTill = { tried: 0, reached: 0, tilled: 0, why: '' };
 
 async function tillAndPlant(ctx: SkillContext, tiles: Vec3[] | Array<{ x: number; y: number; z: number }>): Promise<number> {
   const { bot } = ctx;
   let planted = 0;
+  lastTill = { tried: 0, reached: 0, tilled: 0, why: '' };
   for (const t of tiles) {
     throwIfAborted(ctx.signal);
     const p = v3(t.x, t.y, t.z);
     const hoe = findItem(bot, /_hoe$/);
     const seed = findItem(bot, 'wheat_seeds');
     if (!seed) break;
+    lastTill.tried++;
     await gotoNear(ctx, p.x, p.y, p.z, 2, 15_000).catch(() => undefined);
+    if (bot.entity.position.distanceTo(p.offset(0.5, 0.5, 0.5)) > 4.5) {
+      lastTill.why = `could not get within reach of ${fmtPos(p)}`;
+      continue;
+    }
+    lastTill.reached++;
     let b = bot.blockAt(p);
     // Sand/gravel/podzol on the shore: put a dirt block there first.
     if (b && SWAPPABLE.includes(b.name)) {
@@ -116,7 +126,12 @@ async function tillAndPlant(ctx: SkillContext, tiles: Vec3[] | Array<{ x: number
       await sleep(200);
       b = bot.blockAt(p);
     }
-    if (b?.name !== 'farmland' || bot.blockAt(p.offset(0, 1, 0))?.name !== 'air') continue; // (wheat is walk-through too)
+    if (b?.name !== 'farmland') {
+      lastTill.why = `${fmtPos(p)} is ${b?.name ?? 'unloaded'}, not farmland after the hoe`;
+      continue;
+    }
+    lastTill.tilled++;
+    if (bot.blockAt(p.offset(0, 1, 0))?.name !== 'air') continue; // (wheat is walk-through too)
     await bot.equip(seed, 'hand');
     await bot.placeBlock(b, v3(0, 1, 0)).catch(() => undefined);
     await sleep(120);

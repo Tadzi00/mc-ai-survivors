@@ -353,7 +353,9 @@ export class BotAgent {
       // with where it came from.
       const dig = bot.dig.bind(bot);
       bot.dig = (async (block: Block, ...rest: unknown[]) => {
-        const once = !!block && ALLOWED_DIGS.delete(digKey(block.position));
+        // Plants (grass, ferns, flowers) are never part of a building: always fine to break.
+        const plant = !!block && block.boundingBox === 'empty' && !MAN_MADE_RE.test(block.name) && !/wheat|carrots|potatoes|beetroots|_door|torch/.test(block.name);
+        const once = plant || (!!block && ALLOWED_DIGS.delete(digKey(block.position)));
         const why = this.isApprentice()
           ? 'you are a newborn: wait until a teammate has taught you'
           : block && !this.allowHomeDig && !once ? this.digForbidden(block.position) : false;
