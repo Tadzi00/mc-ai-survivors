@@ -189,6 +189,28 @@ const scenarios = {
     return { ok: alive && surfaced, why: `alive=${alive}, reached the surface=${surfaced}` };
   },
 
+  /** A (experienced) mentors newborn B: B must know A's home, chest contents, finds and lessons. */
+  async mentor() {
+    const [a, b] = await startAgents([
+      { name: 'TestA_ment', x: X, z: Z },
+      { name: 'TestB_ment', x: X + 3, z: Z },
+    ]);
+    a.memory.setPlace('home', { x: X, y: Y, z: Z });
+    a.memory.setChest({ x: X + 2, y: Y, z: Z }, { iron_ingot: 5, bread: 3 }, 'me');
+    a.memory.discover('trees', { x: X + 30, y: Y, z: Z });
+    a.memory.learn('gather iron_ore: need a stone pickaxe to mine iron');
+    a.mentor(b);
+    await sleep(1500);
+    const m = b.memory.data;
+    const village = m.places.village;
+    const chest = Object.values(m.storage ?? {})[0];
+    const trees = (m.discoveries ?? []).some((d) => d.what === 'trees');
+    const lesson = (m.lessons ?? []).some((l) => /stone pickaxe/.test(l));
+    await stopAgents([a, b]);
+    const ok = !!village && chest?.items?.iron_ingot === 5 && trees && lesson;
+    return { ok, why: `village=${!!village} chest=${JSON.stringify(chest?.items)} trees=${trees} lesson=${lesson}` };
+  },
+
   /** Player order via /tell: "build shelter" runs instantly without the model. */
   async order() {
     const [a] = await startAgents([{ name: 'TestA_order', x: X, z: Z }]);
