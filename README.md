@@ -145,26 +145,35 @@ falling back to `config.example.yaml`).
 
 ## Skills
 
+The model picks skills; the code runs them deterministically and reports what really happened.
+
 | Skill | Tier | What it does |
 |---|---|---|
-| `gather {block,count}` | all | mine/chop; aliases: `log`/`wood`, `stone`, `ore`, `iron`, `coal`, ... |
-| `craft {item,count}` | all | finds/crafts/places a crafting table; auto-makes planks/sticks |
-| `smelt {item,count,fuel?}` | smart | finds/places a furnace; accepts input or product name |
-| `goto {x,y,z \| place}` | all | pathfind; `place` = remembered name (`home`, `bed`, `chest`, ...) |
-| `explore {direction?,distance?}` | all | walk into new terrain |
-| `follow {player,seconds}` / `attack {target}` / `eat` / `sleep` | all | |
-| `place_block {block,x?,y?,z?}` | smart | |
-| `build_shelter {size}` | all | template room: floor fill, 3-high walls, roof, door (or sealed doorway), torch |
-| `place_bed` / `place_torch` | all | first bed is claimed, later beds are left free for newborns |
-| `farm {action,crop}` | all | till / plant / harvest wheat, carrot, potato, beetroot |
-| `chest_store` / `chest_take {items}` / `give {player,item,count}` | all | |
-| `check_temperature` | all | `/temp raw` + `/room raw` for the bot's position |
-| `say {text}` | all | proximity chat |
-| `write_sign {text}` | smart | places a sign and writes ≤ 4×15 chars |
-| `read_signs {radius}` | all | reads front/back sign text (1.20+) |
-| `write_book {title,pages}` | smart | writes and signs a `writable_book` |
-| `read_book {slot?,source}` | all | inventory or lectern |
-| `remember {note}` / `set_goal {text}` (smart) / `wait {seconds}` | | |
+| `gather {block,count}` | all | mine/chop (`log`, `stone`, `iron_ore`, ...). Only real trees (not house walls), never blocks of a home or protected area; also mines valuable ores passed on the way; walks to remembered spots or explores ~48 blocks when nothing is in reach; gets out of caves first for wood |
+| `craft {item,count}` | all | server-side crafting after checking ingredients + a crafting table in reach; makes planks/sticks/table itself; `pickaxe`/`bed`/`planks` map to what the bot can make |
+| `smelt {item,count,fuel?}` | smart | furnace; counts results by inventory change |
+| `goto {x,y,z \| place}` / `explore` / `go_surface` | all | pathfinding, uses doors of known homes, reports when it stopped short; `go_surface` climbs/digs out of caves |
+| `follow {player,seconds}` | all | humans only (bots following bots did nothing) |
+| `attack {target}` / `eat` / `sleep` | all | `attack cow` walks to remembered herds; `sleep` claims a bed (sets home if none) |
+| `build_shelter {size 4-11}` | all | sealed room with door and torches, warmed until comfortable; tries nearby spots if blocked |
+| `extend_shelter {direction,length}` | all | adds a connected room to your shelter |
+| `heat_room` / `place_torch` / `add_door` / `set_home` | all | torches until warm (judged by where the room is heading); door into a walled-up doorway; home = here |
+| `place_bed` | all | finds room for a bed even in a 3x3 room; first bed claimed, later beds left for newborns |
+| `plant_sapling {count}` / `farm {action,crop}` | all | new trees; till/plant/harvest |
+| `chest_store` / `chest_take {items}` / `give` | all | verified transfers; chests remembered with contents; take goes to the chest that holds the item |
+| `say` (free in any reply) / `shout` / `write_sign` / `read_signs` / `write_book` / `read_book` | mixed | communication (see below) |
+| `mark_place` / `remember` / `set_goal` / `check_temperature` / `wait` | mixed | memory and status |
+
+## What happens without the model (reflexes, automation)
+
+- Fight (with a weapon) or flee (bare hands, weak, creeper); sprint away when hurt; shout HELP with coordinates.
+- Run to a teammate's HELP within 150 blocks; "are you alive?" check-in after 30 s, answered automatically.
+- Eat when hungry; hunt animals when starving with no food; swim up when drowning; escape lava/fire.
+- At night in the open: go home or dig a sealed 3-deep bunker; dig out at dawn. Sleep in own bed at night.
+- Warm up when cold (body temperature from RealisticSeasons): go home and add torches.
+- Put on better armor; remember ores, water, animals, trees, chests, utilities, deaths; learn from failures.
+- A newborn is mentored by the nearest bot (home, chests, finds, lessons copied + whispered welcome).
+- Player orders via /msg ("build shelter", "come here", ...) run instantly.
 
 ## RealisticSeasons
 
