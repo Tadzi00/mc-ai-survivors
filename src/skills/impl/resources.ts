@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../../util/time.js';
 import type { SkillArgsOf } from '../schemas.js';
 import type { SkillContext } from '../context.js';
-import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, isUnderground, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
+import { countItem, findBlocks, findItem, fmtPos, freeSpotNearBot, goSurface, gotoNear, gotoXZ, isUnderground, isHomeBlock, isTreeLog, nearManMade, transitHomeDoor, nearestBlock, placeItemAt, resolveBlockNames } from '../helpers.js';
 
 /** Name of the item a block usually drops (for counting progress). */
 function dropNameFor(blockName: string): RegExp {
@@ -50,6 +50,22 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
   }
   const skip = unreachableFor(bot);
   let travelled = '';
+  let explored = 0;
+  /** Nothing nearby and nothing remembered: walk ~48 blocks in a fresh direction and look again. */
+  const exploreFor = async (): Promise<boolean> => {
+    if (explored >= 2) return false;
+    explored++;
+    const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] as const;
+    const [dx, dz] = dirs[Math.floor(Math.random() * dirs.length)]!;
+    const p = bot.entity.position;
+    try {
+      await gotoXZ(ctx, p.x + dx * 48, p.z + dz * 48, 45_000);
+    } catch {
+      if (ctx.signal.aborted) throw new AbortError();
+    }
+    travelled = travelled || `explored ${Math.round(Math.hypot(bot.entity.position.x - p.x, bot.entity.position.z - p.z))} blocks to look for ${a.block}`;
+    return true;
+  };
   const wantLogs = names.every((n) => /_log$|_stem$/.test(n));
   /** Nearest remembered place (20-150 blocks away) where this resource was seen. */
   const rememberedSpot = (): { what: string; x: number; y: number; z: number } | undefined => {
@@ -66,7 +82,11 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
       if (failures >= 4 && !travelled) {
         // Everything nearby was unreachable (e.g. trees down a cliff): try the remembered spot instead.
         const spot = rememberedSpot();
-        if (!spot) break;
+        if (!spot) {
+          failures = 0;
+          if (await exploreFor()) continue;
+          break;
+        }
         travelled = `walked to ${spot.what} seen at ${spot.x},${spot.y},${spot.z}`;
         await gotoNear(ctx, spot.x, spot.y, spot.z, 4, 60_000).catch(() => undefined);
         failures = 0;
@@ -87,9 +107,11 @@ export async function gatherSkill(ctx: SkillContext, a: SkillArgsOf<'gather'>): 
         .sort((p, q) => targetCost(bot, p, feetY) - targetCost(bot, q, feetY));
       if (targets.length === 0) {
         // Nothing here: walk once to the nearest place where this resource was seen before.
-        if (travelled) break;
-        const spot = rememberedSpot();
-        if (!spot) break;
+        const spot = travelled ? undefined : rememberedSpot();
+        if (!spot) {
+          if (await exploreFor()) continue;
+          break;
+        }
         travelled = `walked to ${spot.what} seen at ${spot.x},${spot.y},${spot.z}`;
         await gotoNear(ctx, spot.x, spot.y, spot.z, 4, 60_000).catch(() => undefined);
         continue;
