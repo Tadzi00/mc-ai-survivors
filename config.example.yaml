@@ -14,9 +14,9 @@ rcon:
   timeoutMs: 5000
 
 population:
-  maxBots: 8              # hard cap on living bots
-  smartSlots: 2           # how many living bots may use the smart tier at once
-  initialBots: 2          # spawned at first start (they take the smart slots)
+  maxBots: ${MAX_BOTS:-8} # hard cap on living bots
+  smartSlots: ${SMART_SLOTS:-2} # how many living bots may use the smart tier at once
+  initialBots: ${INITIAL_BOTS:-2} # spawned at first start (they take the smart slots)
   reseedWhenExtinct: true # if every bot is dead, spawn initialBots again
   spawnPollSeconds: 30    # how often to ask the bridge plugin "/survivors canspawn"
   namePrefix: Surv_       # bots are Surv_01, Surv_02, ... names are never reused
@@ -50,8 +50,8 @@ providers:
     type: ollama
     # Local container (docker compose --profile ollama) or any remote Ollama server:
     baseUrl: ${OLLAMA_BASE_URL:-http://localhost:11434}
-    concurrency: 1        # one GPU -> one request at a time (RTX 2060 6GB)
-    timeoutMs: 90000
+    concurrency: ${OLLAMA_CONCURRENCY:-1}  # one GPU/CPU -> one request at a time
+    timeoutMs: ${OLLAMA_TIMEOUT_MS:-90000}  # CPU-only Ollama needs ~120000+
     retries: 2
     keepAlive: 30m
 
@@ -77,12 +77,12 @@ tiers:
   # with concurrency 1 Ollama swaps models as needed (set OLLAMA_MAX_LOADED_MODELS=2 if VRAM allows).
   smart:
     provider: local
-    model: qwen2.5:7b
+    model: ${SMART_MODEL:-qwen2.5:7b}
     maxTokens: 400   # a 5-step plan + say + learned is ~150 tokens; prompt + reply must fit the 4096 context
     temperature: 0.4
   basic:
     provider: local
-    model: qwen2.5:3b
+    model: ${BASIC_MODEL:-qwen2.5:3b}
     maxTokens: 200
     temperature: 0.3
 

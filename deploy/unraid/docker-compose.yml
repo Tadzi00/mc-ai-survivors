@@ -1,0 +1,92 @@
+# mc-ai-survivors on Unraid (Compose Manager stack). See README.md in this folder.
+#
+# Minecraft (Paper) + bots only. The LLM is the separate Unraid "ollama" container, reached by URL
+# (OLLAMA_BASE_URL), so it can move to a GPU without touching this stack.
+#
+# All data lives outside the repo copy, under STACK_DIR (default /mnt/dockervolumes/mc-ai-survivors):
+#   .env  config.yaml  data/  plugins/  state/  logs/  app/ (this repo)
+#
+# SECURITY: offline mode -> anyone who reaches the game port can join as ANY name. Keep it on the
+# LAN / WireGuard only (not on the public mc-router) and keep the whitelist on. RCON is not published.
+name: mc_ai_survivors  # = what Compose Manager uses for project "MC_AI_Survivors"
+
+services:
+  minecraft:
+    image: itzg/minecraft-server:latest
+    container_name: mc-ai-survivors-minecraft
+    environment:
+      UID: 1000
+      GID: 100
+      TZ: ${TZ:-Europe/Warsaw}
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: ${MC_VERSION:-1.21.4}
+      ONLINE_MODE: "FALSE"
+      ENFORCE_SECURE_PROFILE: "FALSE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: ${RCON_PASSWORD:?set RCON_PASSWORD in .env}
+      RCON_PORT: 25575
+      MEMORY: ${MC_MEMORY:-4G}
+      DIFFICULTY: ${MC_DIFFICULTY:-normal}
+      ENABLE_WHITELIST: ${MC_ENABLE_WHITELIST:-true}
+      ENFORCE_WHITELIST: ${MC_ENABLE_WHITELIST:-true}
+      WHITELIST: ${MC_WHITELIST:-}
+      OPS: ${MC_OPS:-}
+      MOTD: "mc-ai-survivors"
+      SPAWN_PROTECTION: 0
+      VIEW_DISTANCE: 8
+      ENABLE_AUTOPAUSE: "FALSE"
+    ports:
+      - "${MC_PORT_PUBLIC:-25566}:25565"
+    volumes:
+      - ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/data:/data
+      - ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/plugins:/plugins:ro
+    networks: [survivors]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "1m", max-file: "5" }
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/itzg/docker-minecraft-server/master/docs/img/logo.png"
+      net.unraid.docker.shell: "bash"
+
+  bots:
+    build:
+      context: ../..
+    image: mc-ai-survivors-bots:local
+    pull_policy: build
+    container_name: mc-ai-survivors-bots
+    depends_on:
+      minecraft:
+        condition: service_healthy
+    env_file:
+      - path: ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/.env
+        required: false
+    environment:
+      TZ: ${TZ:-Europe/Warsaw}
+      MC_HOST: minecraft
+      MC_PORT: 25565
+      MC_VERSION: ${MC_VERSION:-1.21.4}
+      RCON_HOST: minecraft
+      RCON_PORT: 25575
+      RCON_PASSWORD: ${RCON_PASSWORD}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:?set OLLAMA_BASE_URL in .env}
+      CONFIG_FILE: /app/config.yaml
+    # Reach the Unraid ollama container through the host's published port 11434.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/config.yaml:/app/config.yaml:ro
+      - ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/state:/app/state
+      - ${STACK_DIR:-/mnt/dockervolumes/mc-ai-survivors}/logs:/app/logs
+    networks: [survivors]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "1m", max-file: "5" }
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/itzg/docker-minecraft-server/master/docs/img/logo.png"
+      net.unraid.docker.shell: "sh"
+
+networks:
+  survivors: {}

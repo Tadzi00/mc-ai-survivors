@@ -64,6 +64,8 @@ docker compose restart bots
 On a 6 GB card (e.g. RTX 2060) keep `concurrency: 1`; Ollama swaps the 7B/3B models as needed.
 Set `OLLAMA_MAX_LOADED_MODELS=2` only if both fit in VRAM.
 
+**Unraid:** see [deploy/unraid/README.md](deploy/unraid/README.md) (Compose Manager stack, CPU or GPU Ollama).
+
 **B. Remote Ollama server** — set `OLLAMA_BASE_URL=http://<host>:11434` in `.env`, then
 `docker compose up -d`.
 
