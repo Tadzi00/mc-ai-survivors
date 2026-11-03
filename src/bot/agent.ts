@@ -1683,7 +1683,8 @@ export class BotAgent {
           : undefined,
       hasTorch: countItem(bot, 'torch') > 0,
       // An unreachable home is no home: bots stood retrying the same blocked route until shot or frozen.
-      homeKnown: !!this.memory.place('home') && Date.now() >= this.homeSkipUntil,
+      // ...unless freezing: then one more try beats certain death (a bot froze 7 s before its skip ended).
+      homeKnown: !!this.memory.place('home') && (Date.now() >= this.homeSkipUntil || this.temp?.stage === 'HYPOTHERMIA'),
     };
   }
 
