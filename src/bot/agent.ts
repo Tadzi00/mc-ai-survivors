@@ -326,6 +326,8 @@ export class BotAgent {
   private lastSurfaceAt = 0;
   /** warm_home failed to reach home this many times in a row; past 2 home is skipped until homeSkipUntil. */
   private homeMisses = 0;
+  /** Overhead blocks the unstick routine already broke once (never again). */
+  private overheadDug = new Set<string>();
   private homeSkipUntil = 0;
   private noRise = 0;
   private lastHurtAt = 0;
@@ -1515,7 +1517,10 @@ export class BotAgent {
       // part of a village building or near home.
       const lid = bot.blockAt(p.floored().offset(0, 2, 0));
       if (this.stuckTries >= 2 && lid && lid.boundingBox === 'block' && !NEVER_DIG.test(lid.name) && bot.canDigBlock(lid) &&
-        !this.deps.protectedAreas?.contains(lid.position) && !(home && Math.hypot(lid.position.x - home.x, lid.position.z - home.z) < 6)) {
+        !this.deps.protectedAreas?.contains(lid.position) && !this.deps.village?.buildingAt(lid.position) && !this.overheadDug.has(digKey(lid.position)) &&
+        !(home && Math.hypot(lid.position.x - home.x, lid.position.z - home.z) < 6)) {
+        // Once per block: a bot standing in a doorway dug the lintel 36 times (something kept putting it back).
+        this.overheadDug.add(digKey(lid.position));
         this.jsonl.write('stuck', { pos: { x: lid.position.x, y: lid.position.y, z: lid.position.z }, action: `dig overhead ${lid.name}` });
         ALLOWED_DIGS.add(digKey(lid.position));
         await bot.dig(lid, true).catch(() => undefined);
