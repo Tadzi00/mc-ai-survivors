@@ -60,6 +60,8 @@ describe('reflex choice', () => {
   it('warms up when cold', () => {
     expect(chooseReflex({ ...calm, cold: true, homeKnown: true })).toBe('warm_home');
     expect(chooseReflex({ ...calm, cold: true, hasTorch: true })).toBe('warm_torch');
+    expect(chooseReflex({ ...calm, cold: true, shelterKnown: true })).toBe('warm_home'); // no home: a village building
+    expect(chooseReflex({ ...calm, cold: true })).toBeNull();
     expect(chooseReflex({ ...calm, cold: undefined, hasTorch: true })).toBeNull();
   });
   it('sleeps at night with a bed', () => expect(chooseReflex({ ...calm, isNight: true, bedKnown: true })).toBe('sleep'));

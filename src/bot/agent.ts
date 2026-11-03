@@ -1580,6 +1580,16 @@ export class BotAgent {
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0];
   }
 
+  /** Middle of the nearest village building within 64 blocks (a warm-up spot for bots without a home). */
+  private nearestShelter(): { x: number; y: number; z: number } | undefined {
+    const me = this.bot?.entity?.position;
+    if (!me) return undefined;
+    return (this.deps.village?.data.buildings ?? [])
+      .map((b) => ({ x: Math.floor((b.x0 + b.x1) / 2), y: b.y0, z: Math.floor((b.z0 + b.z1) / 2) }))
+      .filter((c) => Math.hypot(c.x - me.x, c.z - me.z) <= 64)
+      .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z))[0];
+  }
+
   private hostilesWithin(radius: number): Entity[] {
     const bot = this.bot!;
     return Object.values(bot.entities).filter(
@@ -1685,6 +1695,8 @@ export class BotAgent {
       // An unreachable home is no home: bots stood retrying the same blocked route until shot or frozen.
       // ...unless freezing: then one more try beats certain death (a bot froze 7 s before its skip ended).
       homeKnown: !!this.memory.place('home') && (Date.now() >= this.homeSkipUntil || this.temp?.stage === 'HYPOTHERMIA'),
+      // Newborns without a home froze with 5 shelters in the village: warm up in the nearest one.
+      shelterKnown: !!this.nearestShelter() && (Date.now() >= this.homeSkipUntil || this.temp?.stage === 'HYPOTHERMIA'),
     };
   }
 
@@ -1949,7 +1961,8 @@ export class BotAgent {
       case 'eat':
         return eatSkill(ctx);
       case 'warm_home': {
-        const home = this.memory.place('home')!;
+        const home = this.memory.place('home') ?? this.nearestShelter();
+        if (!home) return 'no home or village shelter known';
         if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) > 3) {
           await gotoNear(ctx, home.x, home.y, home.z, 1, 18_000).catch(() => undefined);
           if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3) {

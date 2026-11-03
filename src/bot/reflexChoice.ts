@@ -30,6 +30,8 @@ export interface ReflexState {
   cold?: boolean;
   hasTorch: boolean;
   homeKnown: boolean;
+  /** The village has a building to warm up in (used when the bot has no home of its own). */
+  shelterKnown?: boolean;
 }
 
 export type Reflex =
@@ -69,7 +71,8 @@ export function chooseReflex(s: ReflexState): Reflex | null {
   // Keep a reserve: in daylight with an animal in sight, stock up before hunger becomes an emergency.
   if (s.foodItems !== undefined && s.foodItems < 3 && s.food <= 18 && s.preyNear && !s.isNight && !s.hostile) return 'hunt';
   if (s.cold === true) {
-    if (s.homeKnown) return 'warm_home';
+    // No home of its own: a village building is still better than freezing in the open.
+    if (s.homeKnown || s.shelterKnown) return 'warm_home';
     if (s.hasTorch) return 'warm_torch';
   }
   if (s.bunkeredAtDay) return 'leave_bunker';
