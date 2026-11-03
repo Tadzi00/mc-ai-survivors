@@ -128,6 +128,8 @@ const NEVER_DIG = /door|_bed$|chest|barrel|crafting_table|furnace|smoker|torch|l
 const BODY_COLD = new Set(['COLD', 'SHIVERING', 'HYPOTHERMIA']);
 
 const PREY = ['cow', 'pig', 'sheep', 'chicken', 'rabbit'];
+/** Mobs that shoot: running 14 blocks is not out of their range, and a leaky room does not stop arrows. */
+const RANGED_MOBS = new Set(['skeleton', 'stray', 'bogged', 'pillager']);
 const PREY_LABELS = new Set(PREY.map((p) => `${p}s`));
 
 const REFLEX_COOLDOWN_MS: Partial<Record<Reflex, number>> = {
@@ -1587,7 +1589,9 @@ export class BotAgent {
     bot.setControlState('sprint', true);
     try {
       while (Date.now() < end) {
-        const threats = this.hostilesWithin(safe);
+        // Archers hit from ~16 blocks: 14 counted as "escaped" and strays shot the bot seconds later.
+        const r = this.hostilesWithin(24).some((e) => RANGED_MOBS.has(e.name ?? '')) ? Math.max(safe, 24) : safe;
+        const threats = this.hostilesWithin(r);
         if (threats.length === 0) return 'escaped';
         const me = bot.entity.position;
         // run directly away from the average threat position
@@ -1837,7 +1841,9 @@ export class BotAgent {
         // Home is no refuge when the mob stands between us and it, or is already there (a leaky room:
         // a bot "fled home" 117 times in 20 s while a zombie inside hit it to death).
         const mobBlocksHome = !!homeV && !!hostile && (hostile.position.distanceTo(homeV) < me.distanceTo(homeV) || hostile.position.distanceTo(homeV) < 4);
-        if (homeV && me.distanceTo(homeV) < 40 && !mobBlocksHome) {
+        // A leaky home does not stop arrows: bots "fled home" and stood there being shot by strays.
+        const archer = !!hostile && RANGED_MOBS.has(hostile.name ?? '');
+        if (homeV && me.distanceTo(homeV) < 40 && !mobBlocksHome && !archer) {
           bot.setControlState('sprint', true);
           await gotoNear(ctx, homeV.x, homeV.y, homeV.z, 1, 15_000).catch(() => undefined);
           bot.setControlState('sprint', false);
