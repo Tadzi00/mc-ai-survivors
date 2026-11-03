@@ -128,7 +128,7 @@ export function parsePlan(text: string, tier: Tier): PlanResult {
 
 /** Heuristic: did a skill result string report failure? Used to abandon the rest of a plan. */
 export function looksFailed(result: string): boolean {
-  return /^(failed|cannot|could not|couldn't|no |not enough|need |unknown|timed out|interrupted|found no|too |you already|shout on cooldown|target .* inside)/i.test(
+  return /^(failed|cannot|could not|couldn't|no |not enough|need |unknown|timed out|interrupted|found no|too |you already|shout on cooldown|target .* inside|following another bot|the village already has)/i.test(
     result.trim(),
   );
 }

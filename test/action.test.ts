@@ -92,6 +92,9 @@ describe('multi-step plans', () => {
   it('detects failed results', () => {
     expect(looksFailed('cannot craft stick: need 2 more planks')).toBe(true);
     expect(looksFailed('timed out after 120s')).toBe(true);
+    // refusals the model kept repeating (18x follow, 10x farm setup): count them so the 'stop repeating' note fires
+    expect(looksFailed('following another bot wastes time: split the work')).toBe(true);
+    expect(looksFailed('the village already has a field at -36,62,1 - use farm {"action":"tend"} there')).toBe(true);
     expect(looksFailed('gathered 8 log (wanted 8)')).toBe(false);
     expect(looksFailed('crafted 1 wooden_pickaxe (now have 1)')).toBe(false);
   });
