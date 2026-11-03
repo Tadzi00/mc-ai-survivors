@@ -675,16 +675,29 @@ export class LavaIndex {
  * Emergency hut when no hole can be dug (water nearby, built ground...): wall in the two cells the bot
  * stands in (4 sides at feet and head height) and put a block over its head (plus one to hold it). 10 blocks.
  */
+/** The hut's blocks around `feet`: 4 sides x 2 high, plus the roof (one block on a wall first, as an anchor). */
+function hutCells(feet: Vec3): Vec3[] {
+  const cells: Vec3[] = [];
+  for (const dy of [0, 1]) for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) cells.push(feet.offset(d.x, dy, d.z));
+  cells.push(feet.offset(1, 2, 0), feet.offset(0, 2, 0));
+  return cells;
+}
+
+/** On the outer wall ring of a village building (inside it is fair game: huts there blocked a doorway). */
+function onBuildingWall(ctx: SkillContext, c: Vec3): boolean {
+  const b = ctx.village?.buildingAt(c);
+  return !!b && (c.x === b.x0 || c.x === b.x1 || c.z === b.z0 || c.z === b.z1);
+}
+
+const HUT_BLOCK_RE = /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/;
+
 export async function emergencyHut(ctx: SkillContext): Promise<{ feet?: Vec3; why: string }> {
   const { bot } = ctx;
   const feet = bot.entity.position.floored();
   bot.pathfinder.stop();
   await walkStraight(bot, feet, 1200).catch(() => false);
   bot.clearControlStates();
-  const cells: Vec3[] = [];
-  for (const dy of [0, 1]) for (const d of [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)]) cells.push(feet.offset(d.x, dy, d.z));
-  // the roof block needs a neighbour to be placed against: one block on top of a wall first
-  cells.push(feet.offset(1, 2, 0), feet.offset(0, 2, 0));
+  const cells = hutCells(feet);
   const open = cells.filter((c) => !isSolid(bot.blockAt(c)));
   const blocks = bot.inventory.items().filter((i) => /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|.*_planks|sand|gravel)$/.test(i.name));
   const have = blocks.reduce((n, i) => n + i.count, 0);
@@ -715,7 +728,16 @@ export async function leaveHut(ctx: SkillContext, feet: Vec3): Promise<string> {
     await sleep(300); // let the server confirm the opening before walking into it
     await walkStraight(bot, beyond, 2500).catch(() => false);
     if (bot.entity.position.floored().distanceTo(feet) < 1.5) await gotoNear(ctx, beyond.x, beyond.y, beyond.z, 0, 8_000).catch(() => undefined);
-    return bot.entity.position.floored().distanceTo(feet) >= 1.5 ? `stepped out of the emergency hut at ${fmtPos(feet)}` : 'could not get out of the hut';
+    if (bot.entity.position.floored().distanceTo(feet) < 1.5) return 'could not get out of the hut';
+    // Take the rest of the hut down: leftover walls piled up in the village and blocked a doorway (a bot froze there).
+    let removed = 0;
+    for (const c of hutCells(feet)) {
+      const b = bot.blockAt(c);
+      if (!b || !HUT_BLOCK_RE.test(b.name) || !bot.canDigBlock(b) || onBuildingWall(ctx, c) || bot.entity.position.distanceTo(c.offset(0.5, 0.5, 0.5)) > 4.5) continue;
+      ALLOWED_DIGS.add(digKey(c));
+      if (await bot.dig(b, true).then(() => true, () => false)) removed++;
+    }
+    return `stepped out of the emergency hut at ${fmtPos(feet)} and took down ${removed} block(s) of it`;
   }
   return goSurface(ctx);
 }
