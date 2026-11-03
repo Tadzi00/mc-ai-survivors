@@ -1505,6 +1505,17 @@ export class BotAgent {
       const front = p.offset(-Math.sin(yaw), 0, -Math.cos(yaw)).floored();
       const home = this.memory.place('home');
       const nearHome = !!home && Math.hypot(front.x - home.x, front.z - home.z) < 6;
+      // A block right above the head blocks every jump out of a 1-deep hole (two bots froze in the field's
+      // water hole under a cobblestone): from the 2nd try, break it, even if placed by someone, unless it's
+      // part of a village building or near home.
+      const lid = bot.blockAt(p.floored().offset(0, 2, 0));
+      if (this.stuckTries >= 2 && lid && lid.boundingBox === 'block' && !NEVER_DIG.test(lid.name) && bot.canDigBlock(lid) &&
+        !this.deps.protectedAreas?.contains(lid.position) && !(home && Math.hypot(lid.position.x - home.x, lid.position.z - home.z) < 6)) {
+        this.jsonl.write('stuck', { pos: { x: lid.position.x, y: lid.position.y, z: lid.position.z }, action: `dig overhead ${lid.name}` });
+        ALLOWED_DIGS.add(digKey(lid.position));
+        await bot.dig(lid, true).catch(() => undefined);
+        return;
+      }
       for (const b of [bot.blockAt(front.offset(0, 1, 0)), bot.blockAt(front)]) {
         if (!b || b.boundingBox !== 'block' || nearHome || NEVER_DIG.test(b.name) || !bot.canDigBlock(b)) continue;
         if (this.deps.protectedAreas?.contains(b.position) || nearManMade(bot, b.position, 1)) continue;
