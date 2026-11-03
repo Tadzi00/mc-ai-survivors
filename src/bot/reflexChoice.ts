@@ -53,14 +53,15 @@ export function chooseReflex(s: ReflexState): Reflex | null {
   if (s.inWater && s.oxygen < 12) return 'surface';
   if (s.hostile && s.hostile.distance <= 8) {
     if (s.hostile.type === 'creeper') return s.health >= 16 && s.hasWeapon ? 'fight' : 'flee';
-    // With a weapon: fight while reasonably healthy. Bare-handed: only at (nearly) full health vs ONE mob;
-    // fists lose against a zombie most of the time.
+    // With a weapon: fight while reasonably healthy. Bare-handed: never start a fight (fists lost to zombies
+    // even at full health: 7 newborns died "low health after 0 kill(s)"); flee, and fight back only when cornered.
     const many = (s.nearbyHostiles ?? 1) > 1;
-    const fight = s.hasWeapon ? s.health >= 10 && !(many && s.health < 16) : s.health >= 18 && !many;
+    const fight = s.hasWeapon && s.health >= 10 && !(many && s.health < 16);
     return fight ? 'fight' : 'flee';
   }
-  // Run to a teammate who shouted HELP (no model call: speed matters). Only when healthy enough.
-  if (s.helpCall && s.helpCall.distance > 4 && s.helpCall.distance <= 150 && s.health >= 12) return 'assist';
+  // Run to a teammate who shouted HELP (no model call: speed matters). Only when healthy and armed
+  // (unarmed helpers just died next to the one they came to save).
+  if (s.helpCall && s.helpCall.distance > 4 && s.helpCall.distance <= 150 && s.health >= 12 && s.hasWeapon) return 'assist';
   if (s.hasFood && (s.food <= 14 || (s.health < 12 && s.food < 20))) return 'eat';
   // Starving with nothing to eat: go get food NOW (the model kept gathering wood until it starved).
   // Never hunt at night: monsters are out, and hunger alone cannot kill (Normal stops at half a heart).

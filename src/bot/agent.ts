@@ -1817,13 +1817,18 @@ export class BotAgent {
       }
       case 'flee': {
         const home = this.memory.place('home');
-        if (home && home.x !== undefined && bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) < 40) {
+        const me = bot.entity.position;
+        const homeV = home ? me.clone().set(home.x, home.y, home.z) : undefined;
+        // Home is no refuge when the mob stands between us and it, or is already there (a leaky room:
+        // a bot "fled home" 117 times in 20 s while a zombie inside hit it to death).
+        const mobBlocksHome = !!homeV && !!hostile && (hostile.position.distanceTo(homeV) < me.distanceTo(homeV) || hostile.position.distanceTo(homeV) < 4);
+        if (homeV && me.distanceTo(homeV) < 40 && !mobBlocksHome) {
           bot.setControlState('sprint', true);
-          await gotoNear(ctx, home.x, home.y, home.z, 1, 15_000).catch(() => undefined);
+          await gotoNear(ctx, homeV.x, homeV.y, homeV.z, 1, 15_000).catch(() => undefined);
           bot.setControlState('sprint', false);
-          const atHome = bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3;
+          const atHome = bot.entity.position.distanceTo(homeV) <= 3;
           const close = this.hostilesWithin(3)[0];
-          if (!atHome && close) return `cornered on the way home: ${await this.runReflex('fight', close, signal)}`;
+          if (close) return `cornered ${atHome ? 'at home' : 'on the way home'}: ${await this.runReflex('fight', close, signal)}`;
           return atHome ? 'fled home' : 'could not get home';
         }
         if (!hostile) return 'nothing to flee';
@@ -1920,7 +1925,10 @@ export class BotAgent {
         const home = this.memory.place('home')!;
         if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) > 3) {
           await gotoNear(ctx, home.x, home.y, home.z, 1, 18_000).catch(() => undefined);
-          return 'went home to warm up';
+          if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3) return 'went home to warm up';
+          // Could not get there (a bot stuck in the field "went home" 21 times and froze): warm up here.
+          if (bot.inventory.items().some((i) => i.name === 'torch')) return `could not reach home; ${await placeTorchSkill(ctx)}`;
+          return 'could not reach home to warm up';
         }
         return heatRoomSkill(ctx, 3); // add torches until the room is actually warm
       }

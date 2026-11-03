@@ -16,7 +16,8 @@ describe('reflex choice', () => {
   it('surfaces when drowning', () => expect(chooseReflex({ ...calm, inWater: true, oxygen: 5 })).toBe('surface'));
   it('fights when healthy, flees when weak or vs creeper', () => {
     const z = { distance: 4, type: 'zombie' };
-    expect(chooseReflex({ ...calm, hostile: z })).toBe('fight'); // full health, one mob, bare hands
+    expect(chooseReflex({ ...calm, hostile: z })).toBe('flee'); // bare hands: never start a fight
+    expect(chooseReflex({ ...calm, hasWeapon: true, hostile: z })).toBe('fight');
     expect(chooseReflex({ ...calm, health: 6, hostile: z })).toBe('flee');
     expect(chooseReflex({ ...calm, hostile: { distance: 4, type: 'creeper' } })).toBe('flee');
   });
@@ -43,16 +44,18 @@ describe('reflex choice', () => {
   });
   it('takes shelter at night in the open; leaves the bunker by day', () => {
     expect(chooseReflex({ ...calm, isNight: true, nightExposed: true })).toBe('night_shelter');
-    expect(chooseReflex({ ...calm, isNight: true, nightExposed: true, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
+    expect(chooseReflex({ ...calm, hasWeapon: true, isNight: true, nightExposed: true, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
     expect(chooseReflex({ ...calm, bunkeredAtDay: true })).toBe('leave_bunker');
     expect(chooseReflex({ ...calm, isNight: true, nightExposed: false })).toBeNull();
   });
   it('runs to help a teammate when healthy, but own danger comes first', () => {
-    expect(chooseReflex({ ...calm, helpCall: { distance: 60 } })).toBe('assist');
-    expect(chooseReflex({ ...calm, helpCall: { distance: 60 }, health: 10 })).toBeNull();
-    expect(chooseReflex({ ...calm, helpCall: { distance: 400 } })).toBeNull();
-    expect(chooseReflex({ ...calm, helpCall: { distance: 3 } })).toBeNull();
-    expect(chooseReflex({ ...calm, helpCall: { distance: 60 }, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
+    const armed = { ...calm, hasWeapon: true };
+    expect(chooseReflex({ ...armed, helpCall: { distance: 60 } })).toBe('assist');
+    expect(chooseReflex({ ...calm, helpCall: { distance: 60 } })).toBeNull(); // unarmed: don't run into the fight
+    expect(chooseReflex({ ...armed, helpCall: { distance: 60 }, health: 10 })).toBeNull();
+    expect(chooseReflex({ ...armed, helpCall: { distance: 400 } })).toBeNull();
+    expect(chooseReflex({ ...armed, helpCall: { distance: 3 } })).toBeNull();
+    expect(chooseReflex({ ...armed, helpCall: { distance: 60 }, hostile: { distance: 4, type: 'zombie' } })).toBe('fight');
   });
   it('warms up when cold', () => {
     expect(chooseReflex({ ...calm, cold: true, homeKnown: true })).toBe('warm_home');
