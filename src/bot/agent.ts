@@ -322,6 +322,9 @@ export class BotAgent {
   private lastConclusionAt = 0;
   private lastSurfaceY: number | undefined;
   private lastSurfaceAt = 0;
+  /** warm_home failed to reach home this many times in a row; past 2 home is skipped until homeSkipUntil. */
+  private homeMisses = 0;
+  private homeSkipUntil = 0;
   private noRise = 0;
   private lastHurtAt = 0;
   private readonly lastGift = new Map<string, number>();
@@ -1670,7 +1673,8 @@ export class BotAgent {
           ? (!t.comfortable && t.tempC < cfg.coldThresholdC) || BODY_COLD.has(t.stage ?? '')
           : undefined,
       hasTorch: countItem(bot, 'torch') > 0,
-      homeKnown: !!this.memory.place('home'),
+      // An unreachable home is no home: bots stood retrying the same blocked route until shot or frozen.
+      homeKnown: !!this.memory.place('home') && Date.now() >= this.homeSkipUntil,
     };
   }
 
@@ -1936,7 +1940,15 @@ export class BotAgent {
         const home = this.memory.place('home')!;
         if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) > 3) {
           await gotoNear(ctx, home.x, home.y, home.z, 1, 18_000).catch(() => undefined);
-          if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3) return 'went home to warm up';
+          if (bot.entity.position.distanceTo(bot.entity.position.clone().set(home.x, home.y, home.z)) <= 3) {
+            this.homeMisses = 0;
+            return 'went home to warm up';
+          }
+          if (++this.homeMisses >= 2) {
+            this.homeMisses = 0;
+            this.homeSkipUntil = Date.now() + 10 * 60_000;
+            this.log('info', `home ${fmtPos(v3(home.x, home.y, home.z))} unreachable from ${fmtPos(bot.entity.position)}: not trying for 10 min`);
+          }
           // Could not get there (a bot stuck in the field "went home" 21 times and froze): warm up here.
           if (bot.inventory.items().some((i) => i.name === 'torch')) return `could not reach home; ${await placeTorchSkill(ctx)}`;
           return 'could not reach home to warm up';
