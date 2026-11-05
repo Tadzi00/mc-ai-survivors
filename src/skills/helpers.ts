@@ -6,6 +6,7 @@ import vec3 from 'vec3';
 import { AbortError, sleep, throwIfAborted, withTimeout } from '../util/time.js';
 import type { SkillContext } from './context.js';
 import { freeFloor, isKeepClear, scanRoom } from './roomPlan.js';
+import { inShelterBox, stairDirOrder, stairStep, type P3 } from './stairs.js';
 
 const { goals } = pathfinderPkg;
 export type Vec3 = InstanceType<typeof vec3.Vec3>;
@@ -425,9 +426,121 @@ export async function goSurface(ctx: SkillContext): Promise<string> {
       break;
     }
   }
+  // The pathfinder found no way up (e.g. a cave strip next to a shelter, where it may not dig): dig a
+  // staircase by hand. Surv_77 called go_surface 420 times here, each failing in ~20 ms.
+  const dugStairs = skyLightAt(bot) < 13;
+  const stairs = dugStairs ? await digStairsUp(ctx, 40) : '';
   return skyLightAt(bot) >= 13
-    ? `reached open sky at ${fmtPos(bot.entity.position)}`
-    : `still underground at ${fmtPos(bot.entity.position)} (sky light ${skyLightAt(bot)}); try go_surface again or mine upward`;
+    ? `reached open sky at ${fmtPos(bot.entity.position)}${dugStairs ? ' (dug a staircase up)' : ''}`
+    : `still underground at ${fmtPos(bot.entity.position)} (sky light ${skyLightAt(bot)}): ${stairs || 'no way up'}. Do something else here (explore, gather) instead of repeating go_surface`;
+}
+
+const STAIR_FILL_RE = /^(dirt|cobblestone|cobbled_deepslate|stone|netherrack|deepslate|andesite|diorite|granite|tuff)$/;
+
+/** May the escape staircase dig this cell? Never building blocks, shelters, homes, protected areas or liquids. */
+function stairCellOk(ctx: SkillContext, p: Vec3): boolean {
+  const b = ctx.bot.blockAt(p);
+  if (!b) return false;
+  if (/water|lava|bubble_column/.test(b.name)) return false;
+  if (isEmptyCell(b) || b.boundingBox === 'empty') return true;
+  if (MAN_MADE_RE.test(b.name) || /^(bedrock|obsidian|spawner|reinforced_deepslate)$/.test(b.name)) return false;
+  if (!ctx.bot.canDigBlock(b)) return false;
+  if (isHomeBlock(ctx, p)) return false;
+  const boxes = [...(ctx.memory.data.shelters ?? []), ...(ctx.village?.data.buildings ?? [])];
+  if (inShelterBox(boxes, p)) return false;
+  return true;
+}
+
+function liquidAt(bot: Bot, p: P3): boolean {
+  return /water|lava|bubble_column/.test(bot.blockAt(v3(p.x, p.y, p.z))?.name ?? '');
+}
+
+/**
+ * Digs a staircase towards the sky, one step at a time (up to `maxSteps`). Each step clears the head room
+ * and the two cells ahead one block higher, then jumps onto the step. Skips directions that would dig a
+ * building/home/protected block or open a cell under liquid or next to lava. Returns '' when it reached
+ * open sky, else why it stopped.
+ */
+export async function digStairsUp(ctx: SkillContext, maxSteps: number): Promise<string> {
+  const { bot } = ctx;
+  bot.pathfinder.stop();
+  let last: P3 | undefined;
+  let steps = 0;
+  const visited = new Set<string>();
+  for (; steps < maxSteps && skyLightAt(bot) < 13; steps++) {
+    throwIfAborted(ctx.signal);
+    const feet = bot.entity.position.floored();
+    const t0 = Date.now();
+    visited.add(digKey(feet));
+    let moved = false;
+    // Nothing to step onto that way (open floor of a cave): walk over there if no climb works.
+    let sideways: Vec3 | undefined;
+    for (const d of stairDirOrder(last)) {
+      const st = stairStep(feet, d);
+      const cells = st.clear.map((c) => v3(c.x, c.y, c.z));
+      if (!cells.every((c) => stairCellOk(ctx, c))) {
+        ctx.log(`stairs: dir ${d.x},${d.z} blocked at ${cells.filter((c) => !stairCellOk(ctx, c)).map((c) => `${fmtPos(c)} ${bot.blockAt(c)?.name}`).join('; ')}`);
+        continue;
+      }
+      if (st.lid.some((c) => liquidAt(bot, c))) continue;
+      if (cells.some((c) => [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1)].some((n) => /lava/.test(bot.blockAt(c.plus(n))?.name ?? '')))) continue;
+      const floor = v3(st.floor.x, st.floor.y, st.floor.z);
+      if (!isSolid(bot.blockAt(floor))) {
+        if (!sideways && !visited.has(digKey(floor)) && isSolid(bot.blockAt(floor.offset(0, -1, 0))) && isEmptyCell(bot.blockAt(floor)) && isEmptyCell(bot.blockAt(floor.offset(0, 1, 0)))) sideways = floor;
+        const fill = bot.inventory.items().find((i) => STAIR_FILL_RE.test(i.name));
+        if (!fill || !(await placeItemAt(ctx, fill, floor).catch(() => false))) continue;
+      }
+      let ok = true;
+      for (const c of cells) {
+        // Falling gravel/sand refills the cell: dig it a few times.
+        for (let k = 0; k < 4; k++) {
+          throwIfAborted(ctx.signal);
+          const b = bot.blockAt(c);
+          if (!b || b.boundingBox !== 'block') break;
+          const tool = bot.pathfinder.bestHarvestTool(b);
+          if (tool) await bot.equip(tool, 'hand').catch(() => undefined);
+          ALLOWED_DIGS.add(digKey(c));
+          // bot.dig can wait forever for a server answer: bound it by the block's dig time.
+          const ms = b.digTime(tool?.type ?? null, false, false, false, [], []) + 3_000;
+          const dug = await withTimeout(bot.dig(b, true), ms, 'stair dig').then(() => true, () => false);
+          if (!dug) bot.stopDigging();
+          if (!dug) ctx.log(`stairs: could not dig ${b.name} at ${fmtPos(c)} with ${bot.heldItem?.name ?? 'hand'} in ${ms} ms`);
+          ALLOWED_DIGS.delete(digKey(c));
+          if (!dug) break;
+          await sleep(150);
+        }
+        if (isSolid(bot.blockAt(c))) ok = false;
+      }
+      if (!ok) continue;
+      const to = v3(st.to.x, st.to.y, st.to.z);
+      const end = Date.now() + 2_500;
+      try {
+        while (Date.now() < end && bot.entity.position.y < to.y - 0.1) {
+          await bot.lookAt(to.offset(0.5, 1.6, 0.5), true);
+          bot.setControlState('jump', true);
+          bot.setControlState('forward', true);
+          await sleep(100);
+        }
+        await walkStraight(bot, to, 800);
+      } finally {
+        bot.clearControlStates();
+      }
+      ctx.log(`stairs: step ${steps} ${fmtPos(feet)} -> ${fmtPos(bot.entity.position)} (sky ${skyLightAt(bot)}, ${Date.now() - t0} ms)`);
+      if (bot.entity.position.floored().y >= to.y) {
+        last = d;
+        moved = true;
+        break;
+      }
+    }
+    if (!moved && sideways) {
+      await walkStraight(bot, sideways, 2_000).catch(() => false);
+      bot.clearControlStates();
+      moved = !bot.entity.position.floored().equals(feet);
+      ctx.log(`stairs: walked over to ${fmtPos(bot.entity.position)} (nothing to climb onto at ${fmtPos(feet)})`);
+    }
+    if (!moved) return `could not dig a staircase up from ${fmtPos(feet)} after ${steps} step(s) (buildings, liquid or bedrock in the way)`;
+  }
+  return skyLightAt(bot) >= 13 ? '' : `dug ${steps} stair steps up, still no sky`;
 }
 
 /**

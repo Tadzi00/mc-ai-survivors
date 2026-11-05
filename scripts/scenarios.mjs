@@ -572,6 +572,32 @@ export const scenarios = {
     return ok(after >= 13, `${r} | sky light ${before} -> ${after}`);
   },
 
+  // Like go_surface, but the pathfinder may not dig at all (Surv_77: a cave strip next to its underground
+  // shelter where every block was off-limits, go_surface failed 420x in ~20 ms): the staircase must do it.
+  async go_surface_nodig(ctx, P) {
+    const { X, Y, Z } = P;
+    await P.cmd(`fill ${X - 4} ${Y} ${Z - 4} ${X + 4} ${Y + 8} ${Z + 4} minecraft:stone`);
+    await P.cmd(`fill ${X - 1} ${Y} ${Z - 1} ${X + 1} ${Y + 2} ${Z + 1} minecraft:air`);
+    // fresh light data only arrives with the chunk: go far away, then come back and wait for it
+    await P.sleep(2000);
+    await P.cmd(`tp ${P.botName} ${X + 2000} ${Y + 20} ${Z}`);
+    await P.sleep(6000);
+    await P.cmd(`tp ${P.botName} ${X + 0.5} ${Y} ${Z + 0.5}`);
+    await P.give('stone_pickaxe', 1);
+    for (let i = 0; i < 20 && (ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight ?? 15) >= 13; i++) await P.sleep(500);
+    const moves = ctx.bot.pathfinder.movements;
+    const canDig = moves.canDig;
+    moves.canDig = false;
+    try {
+      const r = await goSurfaceSkill(ctx);
+      const after = ctx.bot.blockAt(ctx.bot.entity.position.offset(0, 1.6, 0))?.skyLight;
+      const roof = ctx.bot.blockAt(ctx.bot.entity.position.floored().offset(0, 3, 0));
+      return ok(after >= 13 && /staircase/.test(r), `${r} | sky light ${after} | pickaxe ${!!ctx.bot.inventory.items().find((i) => i.name === 'stone_pickaxe')} | roof ${roof?.name} sky ${roof?.skyLight} | at ${ctx.bot.entity.position}`);
+    } finally {
+      moves.canDig = canDig;
+    }
+  },
+
   async bunker(ctx, P) {
     const { X, Y, Z } = P;
     await P.give('dirt', 4);

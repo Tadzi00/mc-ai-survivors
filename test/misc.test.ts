@@ -333,3 +333,27 @@ describe('lesson quality', () => {
     expect(lf2('craft', { item: 'stone_pickaxe' }, 'cannot craft stone_pickaxe: 3 more cobblestone')).toBeUndefined();
   });
 });
+
+import { inShelterBox, stairDirOrder, stairStep } from '../src/skills/stairs.js';
+
+describe('escape staircase', () => {
+  it('clears head room and the two cells one step up', () => {
+    const s = stairStep({ x: 0, y: 58, z: 0 }, { x: 1, y: 0, z: 0 });
+    expect(s.clear).toEqual([{ x: 0, y: 60, z: 0 }, { x: 1, y: 59, z: 0 }, { x: 1, y: 60, z: 0 }]);
+    expect(s.floor).toEqual({ x: 1, y: 58, z: 0 });
+    expect(s.to).toEqual({ x: 1, y: 59, z: 0 });
+    expect(s.lid).toEqual([{ x: 0, y: 61, z: 0 }, { x: 1, y: 61, z: 0 }]);
+  });
+  it('keeps going the same way when it worked', () => {
+    const o = stairDirOrder({ x: 0, y: 0, z: -1 });
+    expect(o[0]).toEqual({ x: 0, y: 0, z: -1 });
+    expect(o).toHaveLength(4);
+    expect(stairDirOrder()).toHaveLength(4);
+  });
+  it('knows shelter boxes (walls + roof)', () => {
+    const boxes = [{ x0: -31, z0: 15, x1: -27, z1: 19, y0: 58 }];
+    expect(inShelterBox(boxes, { x: -29, y: 60, z: 19 })).toBe(true);
+    expect(inShelterBox(boxes, { x: -29, y: 60, z: 20 })).toBe(false);
+    expect(inShelterBox(boxes, { x: -29, y: 63, z: 17 })).toBe(false);
+  });
+});

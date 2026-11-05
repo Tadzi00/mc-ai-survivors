@@ -527,6 +527,10 @@ The "don't dig next to buildings" rule uses a ManMadeIndex (set of man-made bloc
     in the village, every 30 min at most).
 - **Air first**: in water with oxygen < 10, the reflex tick aborts any running reflex (a 40 s fight in
   water drowned a bot) so `surface` runs; the fight loop honours its abort signal.
+- **Escape staircase**: when `go_surface` finds no open sky to walk to and the pathfinder can't plan a way
+  up (it may not dig next to buildings), it digs a staircase by hand (`digStairsUp`, `skills/stairs.ts`):
+  one step at a time, never through building blocks, shelters, homes, protected areas, under liquid or next
+  to lava. Surv_77 (old world) built a shelter in a cave and called go_surface 420x, each failing in ~20 ms.
 - **Emergency hut**: when no night hole can be dug (water next to it, built ground), the bot walls itself
   in with 10 blocks (4 sides at feet and head, roof + one support); memory place `bunker` note `hut`; in the
   morning `leaveHut` opens one side and steps out.
